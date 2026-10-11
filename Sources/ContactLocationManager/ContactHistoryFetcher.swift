@@ -9,18 +9,21 @@
 // Posted by AnderCover, modified by community. See post 'Timeline' for change history
 // Retrieved 2026-10-08, License - CC BY-SA 4.0
 
-import Combine
 @preconcurrency import Contacts
 import ContactsChangeHistory
+import Observation
 
 @MainActor
-final class ContactHistoryFetcher: ObservableObject {
-    @Published private(set) var contactLocations: [ContactLocationSnapshot] = []
-    
-    private let savedTokenUserDefaultsKey = "CNContactHistoryChangeHistoryToken"
-    private let contactActor = ContactActor.shared
+@Observable
+public final class ContactHistoryFetcher {
+    public private(set) var contactLocations: [ContactLocationSnapshot] = []
+    public private(set) var authorizationStatus: CNAuthorizationStatus
 
-    private var savedToken: Data? {
+    @ObservationIgnored private let savedTokenUserDefaultsKey = "CNContactHistoryChangeHistoryToken"
+    @ObservationIgnored private let contactActor: ContactActor
+    @ObservationIgnored private var changeObserver: Task<Void, Never>?
+
+    @ObservationIgnored private var savedToken: Data? {
         get {
             UserDefaults.standard.data(forKey: savedTokenUserDefaultsKey)
         }
@@ -29,26 +32,50 @@ final class ContactHistoryFetcher: ObservableObject {
         }
     }
 
-    private var cancellables: Set<AnyCancellable> = []
-
-    /// Observes `CNContactStoreDidChange` to respond to changes while the app is running,
-    /// for example if a contact has been changed on another device.
-    func bind() {
-        NotificationCenter.default
-            .publisher(for: .CNContactStoreDidChange)
-            .sink { [weak self] _ in
-                Task { await self?.fetchChanges() }
-            }
-            .store(in: &cancellables)
+    /// Starts loading contacts right away if access has already been granted. Otherwise the host
+    /// calls `requestAccess()` when it's ready to show the system prompt.
+    /// Geocoding tries MapKit first, then Mapsi, then Google. A provider without a key is left out.
+    public init(mapsiAPIKey: String? = nil, googleAPIKey: String? = nil) {
+        let geocoder = GeocoderFactory.makeDefault(mapsiAPIKey: mapsiAPIKey, googleAPIKey: googleAPIKey)
+        contactActor = ContactActor(geocoder: geocoder)
+        authorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
+        startIfAuthorized()
     }
-    
-    func reset() async {
+
+    /// Shows the system permission prompt if the user hasn't been asked yet, then starts loading
+    /// contacts if access was granted. Does nothing for any other status.
+    public func requestAccess() async {
+        guard authorizationStatus == .notDetermined else { return }
+        _ = try? await CNContactStore().requestAccess(for: .contacts)
+        authorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
+        startIfAuthorized()
+    }
+
+    private func startIfAuthorized() {
+        guard authorizationStatus == .authorized || authorizationStatus == .limited,
+              changeObserver == nil else { return }
+        observeContactStore()
+        Task { await fetchChanges() }
+    }
+
+    /// Responds to `CNContactStoreDidChange`, for example if a contact has been changed on another device.
+    /// The task ends once the fetcher is deallocated.
+    private func observeContactStore() {
+        changeObserver = Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: .CNContactStoreDidChange) {
+                guard let self else { break }
+                await self.fetchChanges()
+            }
+        }
+    }
+
+    public func reset() async {
         savedToken = nil
         await contactActor.removeAll()
         contactLocations = []
     }
 
-    func fetchChanges() async {
+    private func fetchChanges() async {
         // At first launch, the token will be nil and all contacts will be retrieved as additions
         guard let (token, changes) = try? await Self.fetchHistory(startingToken: savedToken) else { return }
         savedToken = token

@@ -22,8 +22,12 @@ enum ContactHistoryChange: Sendable {
 }
 
 actor ContactActor {
-    static let shared = ContactActor()
-    
+    private let geocoder: any Geocoder
+
+    init(geocoder: any Geocoder) {
+        self.geocoder = geocoder
+    }
+
     func fetchAll() async -> [ContactLocationSnapshot] {
         await SkopelosClient.shared.readAsync { context in
             ContactLocation.SK_all(context).map(ContactLocationSnapshot.init)
@@ -83,24 +87,12 @@ actor ContactActor {
     }
 
     private func geocode(_ address: CNPostalAddress) async -> CLLocationCoordinate2D? {
-        var coordinate: CLLocationCoordinate2D?
-
-        let addressString = CNPostalAddressFormatter.string(from: address, style: .mailingAddress)
-
-        guard let request = MKGeocodingRequest(addressString: addressString) else {
-            return coordinate
-        }
-
         do {
-            let mapItems = try await request.mapItems
-            if let item = mapItems.first {
-                coordinate = item.location.coordinate
-            }
+            return try await geocoder.coordinate(for: address)
         } catch {
-            print("geocoding failure for \(addressString): \(error)")
+            print("geocoding failure for \(address.mailingString): \(error)")
+            return nil
         }
-        
-        return coordinate
     }
     
     private static func delete(contactIdentifier: String, in context: NSManagedObjectContext) {

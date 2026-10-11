@@ -11,7 +11,7 @@
 
 @preconcurrency import Contacts
 
-/// Collects change history events synchronously; not thread-safe, use from one queue.
+/// Collects change history events synchronously. Not `Sendable`; create it, fill it and read it within a single call.
 final class Visitor: NSObject, CNChangeHistoryEventVisitor {
     private(set) var changes: [ContactHistoryChange] = []
 

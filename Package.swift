@@ -33,6 +33,10 @@ let package = Package(
                 .product(name: "Skopelos", package: "Skopelos"),
             ]
         ),
+        .testTarget(
+            name: "ContactLocationManagerTests",
+            dependencies: ["ContactLocationManager"]
+        ),
     ],
     swiftLanguageModes: [.v6]
 )

@@ -9,6 +9,8 @@
 import CoreData
 import CoreLocation
 
+// Named explicitly: Core Data can't resolve a module-relative class name from a package's resource bundle.
+@objc(ContactLocation)
 final class ContactLocation: NSManagedObject {
     @NSManaged var contactId: String
     @NSManaged var latitude: CLLocationDegrees

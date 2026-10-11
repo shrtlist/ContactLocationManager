@@ -31,6 +31,9 @@ let package = Package(
             dependencies: [
                 "ContactsChangeHistory",
                 .product(name: "Skopelos", package: "Skopelos"),
+            ],
+            resources: [
+                .process("ContactLocationManager.xcdatamodeld"),
             ]
         ),
         .testTarget(

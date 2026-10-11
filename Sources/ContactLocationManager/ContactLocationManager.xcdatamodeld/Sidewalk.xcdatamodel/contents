@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23788.4" systemVersion="24G84" minimumToolsVersion="Xcode 7.3" sourceLanguage="Objective-C" userDefinedModelVersionIdentifier="">
-    <entity name="ContactLocation" representedClassName=".ContactLocation" syncable="YES">
+    <entity name="ContactLocation" representedClassName="ContactLocation" syncable="YES">
         <attribute name="contactId" attributeType="String" syncable="YES"/>
         <attribute name="latitude" attributeType="Double" minValueString="-90" maxValueString="90" usesScalarValueType="NO" syncable="YES"/>
         <attribute name="longitude" attributeType="Double" minValueString="-180" maxValueString="180" usesScalarValueType="NO" syncable="YES"/>

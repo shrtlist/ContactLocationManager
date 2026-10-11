@@ -7,7 +7,7 @@
 import CoreLocation
 
 /// Provider-independent failure modes, so failover logic doesn't need to know any service's details.
-enum GeocodingError: Error, Sendable {
+public enum GeocodingError: Error, Sendable {
     /// Quota or throttling hit. The provider should be skipped for a while.
     case rateLimited
     /// Network failure or server error.
@@ -18,7 +18,7 @@ enum GeocodingError: Error, Sendable {
     case invalidRequest
 }
 
-protocol Geocoder: Sendable {
+public protocol Geocoder: Sendable {
     /// Returns nil when the address has no match. Throws `GeocodingError` on service failure.
     func coordinate(for address: CNPostalAddress) async throws -> CLLocationCoordinate2D?
 }

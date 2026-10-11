@@ -6,8 +6,10 @@
 @preconcurrency import Contacts
 import MapKit
 
-struct MapKitGeocoder: Geocoder {
-    func coordinate(for address: CNPostalAddress) async throws -> CLLocationCoordinate2D? {
+public struct MapKitGeocoder: Geocoder {
+    public init() {}
+
+    public func coordinate(for address: CNPostalAddress) async throws -> CLLocationCoordinate2D? {
         guard let request = MKGeocodingRequest(addressString: address.mailingString) else { return nil }
         do {
             return try await request.mapItems.first?.location.coordinate

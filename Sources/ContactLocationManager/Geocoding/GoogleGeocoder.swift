@@ -7,9 +7,14 @@
 import CoreLocation
 
 /// https://developers.google.com/maps/documentation/geocoding
-struct GoogleGeocoder: Geocoder {
+public struct GoogleGeocoder: Geocoder {
     let apiKey: String
-    var session: URLSession = .shared
+    let session: URLSession
+
+    public init(apiKey: String, session: URLSession = .shared) {
+        self.apiKey = apiKey
+        self.session = session
+    }
 
     private struct Response: Decodable {
         struct Result: Decodable {
@@ -23,7 +28,7 @@ struct GoogleGeocoder: Geocoder {
         let results: [Result]?
     }
 
-    func coordinate(for address: CNPostalAddress) async throws -> CLLocationCoordinate2D? {
+    public func coordinate(for address: CNPostalAddress) async throws -> CLLocationCoordinate2D? {
         var components = URLComponents(string: "https://maps.googleapis.com/maps/api/geocode/json")!
         components.queryItems = [
             URLQueryItem(name: "address", value: address.mailingString),

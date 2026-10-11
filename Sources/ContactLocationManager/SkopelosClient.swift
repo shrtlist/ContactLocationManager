@@ -20,16 +20,16 @@ extension Skopelos {
     }
 }
 
-final class SkopelosClient: Skopelos {
-
-    nonisolated(unsafe) static let shared: SkopelosClient = {
-        guard let modelURL = Bundle(for: SkopelosClient.self).url(forResource: "ContactLocationManager", withExtension: "momd") else {
-            fatalError("ContactLocationManager.momd is missing from the app bundle")
+// Skopelos serializes access to its contexts itself, so sharing one client across actors is safe.
+final class SkopelosClient: Skopelos, @unchecked Sendable {
+    private static let modelURL: URL = {
+        guard let modelURL = Bundle.module.url(forResource: "ContactLocationManager", withExtension: "momd") else {
+            fatalError("ContactLocationManager.momd is missing from the package bundle")
         }
-
-        return SkopelosClient(sqliteStack: modelURL, allowsConcurrentWritings: false)
+        return modelURL
     }()
 
+    static let shared = SkopelosClient(sqliteStack: modelURL, allowsConcurrentWritings: false)
     override func handleError(_ error: NSError) {
         // clients should do the right thing here
         NSLog("\(#function) \(error.localizedDescription)")

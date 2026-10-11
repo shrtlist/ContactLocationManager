@@ -19,6 +19,9 @@ public final class ContactHistoryFetcher {
     public private(set) var contactLocations: [ContactLocationSnapshot] = []
     public private(set) var authorizationStatus: CNAuthorizationStatus
 
+    /// 0...1 while contacts are being processed, `nil` when idle.
+    public private(set) var syncProgress: Double?
+
     @ObservationIgnored private let savedTokenUserDefaultsKey = "CNContactHistoryChangeHistoryToken"
     @ObservationIgnored private let contactActor: ContactActor
     @ObservationIgnored private var changeObserver: Task<Void, Never>?
@@ -79,7 +82,11 @@ public final class ContactHistoryFetcher {
         // At first launch, the token will be nil and all contacts will be retrieved as additions
         guard let (token, changes) = try? await Self.fetchHistory(startingToken: savedToken) else { return }
         savedToken = token
-        await contactActor.apply(changes)
+        for (index, change) in changes.enumerated() {
+            syncProgress = Double(index) / Double(changes.count)
+            await contactActor.apply([change])
+        }
+        syncProgress = nil
         contactLocations = await contactActor.fetchAll()
     }
 

@@ -11,12 +11,19 @@
 
 @preconcurrency import Contacts
 import ContactsChangeHistory
+import CoreLocation
 import Observation
+
+/// `CNKeyDescriptor`s are immutable, but aren't marked `Sendable`.
+private struct ContactKeys: @unchecked Sendable {
+    let descriptors: [any CNKeyDescriptor]
+    init(_ descriptors: [any CNKeyDescriptor]) { self.descriptors = descriptors }
+}
 
 @MainActor
 @Observable
 public final class ContactHistoryFetcher {
-    public private(set) var contactLocations: [ContactLocationSnapshot] = []
+    public private(set) var contactLocationAnnotations: [ContactLocationAnnotation] = []
     public private(set) var authorizationStatus: CNAuthorizationStatus
 
     /// 0...1 while contacts are being processed, `nil` when idle.
@@ -29,6 +36,7 @@ public final class ContactHistoryFetcher {
     @ObservationIgnored private let savedTokenUserDefaultsKey = "CNContactHistoryChangeHistoryToken"
     @ObservationIgnored private let contactActor: ContactActor
     @ObservationIgnored private let limiter: RequestLimitedGeocoder
+    @ObservationIgnored private let contactKeys: ContactKeys
     @ObservationIgnored private var changeObserver: Task<Void, Never>?
     @ObservationIgnored private var isFetching = false
     @ObservationIgnored private var needsAnotherFetch = false
@@ -47,12 +55,24 @@ public final class ContactHistoryFetcher {
     /// Geocoding tries MapKit first, then Mapsi, then Google. A provider without a key is left out.
     /// `maxRequests` is the total number of addresses that will ever be geocoded, or `nil` for no
     /// limit. Contacts beyond it are skipped and `isRateLimited` becomes true.
-    public init(mapsiAPIKey: String? = nil, googleAPIKey: String? = nil, maxRequests: Int? = nil) {
+    /// `contactKeys` are the contact properties each annotation's `contact` has loaded, on top of
+    /// the postal addresses, which are always loaded. The default is the name, thumbnail and type.
+    public init(mapsiAPIKey: String? = nil, googleAPIKey: String? = nil, maxRequests: Int? = nil,
+                contactKeys: [any CNKeyDescriptor] = ContactHistoryFetcher.defaultContactKeys) {
+        self.contactKeys = ContactKeys(contactKeys + [CNContactPostalAddressesKey as CNKeyDescriptor])
         let geocoder = GeocoderFactory.makeDefault(mapsiAPIKey: mapsiAPIKey, googleAPIKey: googleAPIKey)
         limiter = RequestLimitedGeocoder(base: geocoder, maxRequests: maxRequests)
         contactActor = ContactActor(geocoder: limiter)
         authorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
         startIfAuthorized()
+    }
+
+    public static var defaultContactKeys: [any CNKeyDescriptor] {
+        [
+            CNContactFormatter.descriptorForRequiredKeys(for: .fullName),
+            CNContactThumbnailImageDataKey as CNKeyDescriptor,
+            CNContactTypeKey as CNKeyDescriptor,
+        ]
     }
 
     /// Shows the system permission prompt if the user hasn't been asked yet, then starts loading
@@ -85,7 +105,7 @@ public final class ContactHistoryFetcher {
     public func reset() async {
         savedToken = nil
         await contactActor.removeAll()
-        contactLocations = []
+        contactLocationAnnotations = []
     }
 
     /// Changes the request limit, for example when the user subscribes. If contacts were skipped
@@ -95,7 +115,7 @@ public final class ContactHistoryFetcher {
         isRateLimited = false
         savedToken = nil
         await contactActor.removeAll()
-        contactLocations = []
+        contactLocationAnnotations = []
         await fetchChanges()
     }
 
@@ -126,8 +146,37 @@ public final class ContactHistoryFetcher {
         // Saved after applying: if the app is killed mid-sync, the next launch reads these changes again.
         savedToken = token
         syncProgress = nil
-        contactLocations = await contactActor.fetchAll()
+        let snapshots = await contactActor.fetchAll()
+        // If the contacts couldn't be read, keep what is on the map rather than blanking it.
+        if let annotations = await Self.makeAnnotations(from: snapshots, keys: contactKeys) {
+            contactLocationAnnotations = annotations
+        }
         isRateLimited = await limiter.didRefuse
+    }
+
+    /// Looks up each stored location's contact in one request and builds the annotations.
+    /// Returns nil if the request fails.
+    @concurrent
+    private static func makeAnnotations(from snapshots: [ContactLocationSnapshot], keys: ContactKeys) async -> sending [ContactLocationAnnotation]? {
+        guard !snapshots.isEmpty else { return [] }
+
+        let identifiers = Array(Set(snapshots.map(\.contactId)))
+        let predicate = CNContact.predicateForContacts(withIdentifiers: identifiers)
+
+        let contacts: [CNContact]
+        do {
+            contacts = try CNContactStore().unifiedContacts(matching: predicate, keysToFetch: keys.descriptors)
+        } catch {
+            print("contact fetch failed: \(error)")
+            return nil
+        }
+        let contactsById = Dictionary(contacts.map { ($0.identifier, $0) }, uniquingKeysWith: { first, _ in first })
+
+        return snapshots.compactMap { snapshot in
+            guard let contact = contactsById[snapshot.contactId],
+                  let address = contact.postalAddresses.first(where: { $0.identifier == snapshot.postalAddressId }) else { return nil }
+            return ContactLocationAnnotation(contact: contact, labeledAddress: address, latitude: snapshot.latitude, longitude: snapshot.longitude)
+        }
     }
 
     @concurrent

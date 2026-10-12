@@ -51,7 +51,7 @@ If access has already been granted, the fetcher starts syncing as soon as it is 
 
 | Property | Meaning |
 | --- | --- |
-| `contactLocations: [ContactLocationSnapshot]` | Every geocoded address. Each snapshot has `contactId`, `postalAddressId`, `latitude`, `longitude` and a `coordinate`. Updates as the sync progresses. |
+| `contactLocationAnnotations: [ContactLocationAnnotation]` | Every geocoded address, as an `MKAnnotation` with `contact`, `labeledAddress`, `coordinate`, `title` (the contact's name) and `subtitle` (the address). Replaced when a sync pass finishes. Use the `contactKeys:` init parameter to choose which contact fields `contact` has loaded. |
 | `authorizationStatus: CNAuthorizationStatus` | The current Contacts permission. |
 | `syncProgress: Double?` | 0...1 while contacts are being processed, `nil` when idle. Counts contacts, not addresses. |
 | `isRateLimited: Bool` | True when addresses were skipped because the request limit was reached. |
@@ -60,8 +60,8 @@ If access has already been granted, the fetcher starts syncing as soon as it is 
 
 ```swift
 Task {
-    for await locations in Observations({ fetcher.contactLocations }) {
-        showPins(for: locations)
+    for await contactLocationAnnotations in Observations({ fetcher.contactLocationAnnotations }) {
+        showPins(for: contactLocationAnnotations)
     }
 }
 
@@ -110,7 +110,7 @@ let coordinate = try await geocoder.coordinate(for: postalAddress)  // nil if no
 
 1. The fetcher listens for `CNContactStoreDidChange` and asks Contacts for the changes since its saved history token.
 2. Each added or updated contact has its postal addresses geocoded. Deleted contacts have their locations removed.
-3. Results are written to the store, then `contactLocations` is refreshed from it. The token is saved when the changes have been fetched.
+3. Results are written to the store, then `contactLocationAnnotations` is refreshed from it. The token is saved when the changes have been fetched.
 
 CNContactStore's change-history enumerator can't be called from Swift, so a small Objective-C target (`ContactsChangeHistory`) wraps it.
 

@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import Contacts
 import CoreLocation
+import MapKit
 @testable import ContactLocationManager
 
 private final class StubGeocoder: Geocoder, @unchecked Sendable {
@@ -174,5 +175,51 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
         let geocoder = RequestLimitedGeocoder(base: StubGeocoder(.coordinate(1)), maxRequests: 5, defaults: makeDefaults())
         _ = try await geocoder.coordinate(for: address)
         #expect(await !geocoder.setMaxRequests(nil))
+    }
+}
+
+@Suite struct AnnotationTextTests {
+    private func annotation(givenName: String = "", familyName: String = "", organization: String = "", street: String = "1 Main St", city: String = "Springfield") -> ContactLocationAnnotation {
+        let contact = CNMutableContact()
+        contact.givenName = givenName
+        contact.familyName = familyName
+        contact.organizationName = organization
+
+        let address = CNMutablePostalAddress()
+        address.street = street
+        address.city = city
+        contact.postalAddresses = [CNLabeledValue(label: CNLabelHome, value: address as CNPostalAddress)]
+
+        return ContactLocationAnnotation(contact: contact, labeledAddress: contact.postalAddresses[0],
+                                         latitude: 1, longitude: 2)
+    }
+
+    @Test func titleIsThePersonsName() {
+        #expect(annotation(givenName: "Ada", familyName: "Lovelace").title == "Ada Lovelace")
+    }
+
+    @Test func titleFallsBackToTheOrganization() {
+        #expect(annotation(organization: "Acme").title == "Acme")
+    }
+
+    @Test func titleIsNilWithoutAName() {
+        #expect(annotation().title == nil)
+    }
+
+    /// MapKit reads `title` and `subtitle` through Objective-C, so they must be visible there.
+    @Test func conformsToMKAnnotationForMapKit() {
+        let annotation = annotation(givenName: "Ada", familyName: "Lovelace")
+        let object: NSObject = annotation
+        #expect(annotation is MKAnnotation)
+        #expect(object.responds(to: #selector(getter: MKAnnotation.coordinate)))
+        #expect(object.responds(to: #selector(getter: MKAnnotation.title)))
+        #expect(object.responds(to: #selector(getter: MKAnnotation.subtitle)))
+        #expect(object.value(forKey: "title") as? String == "Ada Lovelace")
+    }
+
+    @Test func subtitleIsTheMailingAddress() {
+        let subtitle = annotation().subtitle
+        #expect(subtitle?.contains("1 Main St") == true)
+        #expect(subtitle?.contains("Springfield") == true)
     }
 }

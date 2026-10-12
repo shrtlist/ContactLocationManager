@@ -8,15 +8,11 @@
 import CoreLocation
 
 /// An immutable, thread-safe copy of a `ContactLocation`, safe to hand across actors.
-public struct ContactLocationSnapshot: Sendable {
-    public let contactId: String
-    public let postalAddressId: String
-    public let latitude: CLLocationDegrees
-    public let longitude: CLLocationDegrees
-
-    public var coordinate: CLLocationCoordinate2D {
-        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
-    }
+struct ContactLocationSnapshot: Sendable {
+    let contactId: String
+    let postalAddressId: String
+    let latitude: CLLocationDegrees
+    let longitude: CLLocationDegrees
 
     init(_ contactLocation: ContactLocation) {
         contactId = contactLocation.contactId

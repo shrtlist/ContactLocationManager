@@ -107,3 +107,51 @@ private final class Clock: @unchecked Sendable {
         }
     }
 }
+
+@Suite struct RequestLimitedGeocoderTests {
+    private func makeDefaults() -> UserDefaults {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        return defaults
+    }
+
+    @Test func refusesOnceTheLimitIsReached() async throws {
+        let base = StubGeocoder(.coordinate(1))
+        let geocoder = RequestLimitedGeocoder(base: base, maxRequests: 2, defaults: makeDefaults())
+        _ = try await geocoder.coordinate(for: address)
+        _ = try await geocoder.coordinate(for: address)
+        await #expect(throws: GeocodingError.self) { try await geocoder.coordinate(for: address) }
+        #expect(base.calls == 2)
+        #expect(await geocoder.didRefuse)
+    }
+
+    @Test func noLimitMeansNoRefusals() async throws {
+        let geocoder = RequestLimitedGeocoder(base: StubGeocoder(.coordinate(1)), maxRequests: nil, defaults: makeDefaults())
+        for _ in 0..<50 { _ = try await geocoder.coordinate(for: address) }
+        #expect(await !geocoder.didRefuse)
+    }
+
+    @Test func failedRequestsDontCount() async throws {
+        let geocoder = RequestLimitedGeocoder(base: StubGeocoder(.failure(.unavailable)), maxRequests: 1, defaults: makeDefaults())
+        for _ in 0..<3 {
+            await #expect(throws: GeocodingError.self) { try await geocoder.coordinate(for: address) }
+        }
+        #expect(await !geocoder.didRefuse)
+    }
+
+    @Test func raisingTheLimitAfterARefusalAsksForAResync() async throws {
+        let geocoder = RequestLimitedGeocoder(base: StubGeocoder(.coordinate(1)), maxRequests: 1, defaults: makeDefaults())
+        _ = try await geocoder.coordinate(for: address)
+        _ = try? await geocoder.coordinate(for: address)
+
+        let needsResync = await geocoder.setMaxRequests(nil)
+        #expect(needsResync)
+        #expect(await !geocoder.didRefuse)
+        _ = try await geocoder.coordinate(for: address)
+    }
+
+    @Test func raisingTheLimitWithoutARefusalNeedsNoResync() async throws {
+        let geocoder = RequestLimitedGeocoder(base: StubGeocoder(.coordinate(1)), maxRequests: 5, defaults: makeDefaults())
+        _ = try await geocoder.coordinate(for: address)
+        #expect(await !geocoder.setMaxRequests(nil))
+    }
+}

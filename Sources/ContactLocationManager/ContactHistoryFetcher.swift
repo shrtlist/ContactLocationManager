@@ -22,8 +22,13 @@ public final class ContactHistoryFetcher {
     /// 0...1 while contacts are being processed, `nil` when idle.
     public private(set) var syncProgress: Double?
 
+    /// True when contacts were skipped because the request limit was reached.
+    /// Cleared by `setMaxRequests(_:)` once the limit is raised.
+    public private(set) var isRateLimited = false
+
     @ObservationIgnored private let savedTokenUserDefaultsKey = "CNContactHistoryChangeHistoryToken"
     @ObservationIgnored private let contactActor: ContactActor
+    @ObservationIgnored private let limiter: RequestLimitedGeocoder
     @ObservationIgnored private var changeObserver: Task<Void, Never>?
 
     @ObservationIgnored private var savedToken: Data? {
@@ -38,9 +43,12 @@ public final class ContactHistoryFetcher {
     /// Starts loading contacts right away if access has already been granted. Otherwise the host
     /// calls `requestAccess()` when it's ready to show the system prompt.
     /// Geocoding tries MapKit first, then Mapsi, then Google. A provider without a key is left out.
-    public init(mapsiAPIKey: String? = nil, googleAPIKey: String? = nil) {
+    /// `maxRequests` is the total number of addresses that will ever be geocoded, or `nil` for no
+    /// limit. Contacts beyond it are skipped and `isRateLimited` becomes true.
+    public init(mapsiAPIKey: String? = nil, googleAPIKey: String? = nil, maxRequests: Int? = nil) {
         let geocoder = GeocoderFactory.makeDefault(mapsiAPIKey: mapsiAPIKey, googleAPIKey: googleAPIKey)
-        contactActor = ContactActor(geocoder: geocoder)
+        limiter = RequestLimitedGeocoder(base: geocoder, maxRequests: maxRequests)
+        contactActor = ContactActor(geocoder: limiter)
         authorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
         startIfAuthorized()
     }
@@ -78,6 +86,17 @@ public final class ContactHistoryFetcher {
         contactLocations = []
     }
 
+    /// Changes the request limit, for example when the user subscribes. If contacts were skipped
+    /// under the old limit and the new one lets them through, everything is geocoded again.
+    public func setMaxRequests(_ maxRequests: Int?) async {
+        guard await limiter.setMaxRequests(maxRequests) else { return }
+        isRateLimited = false
+        savedToken = nil
+        await contactActor.removeAll()
+        contactLocations = []
+        await fetchChanges()
+    }
+
     private func fetchChanges() async {
         // At first launch, the token will be nil and all contacts will be retrieved as additions
         guard let (token, changes) = try? await Self.fetchHistory(startingToken: savedToken) else { return }
@@ -88,6 +107,7 @@ public final class ContactHistoryFetcher {
         }
         syncProgress = nil
         contactLocations = await contactActor.fetchAll()
+        isRateLimited = await limiter.didRefuse
     }
 
     @concurrent

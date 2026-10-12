@@ -10,6 +10,7 @@ import CoreLocation
 ///
 /// Fails over on no-match and on recoverable errors, but not on `.invalidRequest`.
 /// A provider that reports `.rateLimited` is skipped for `cooldown` seconds.
+/// Stops without trying further providers once the calling task is cancelled.
 public actor FailoverGeocoder: Geocoder {
     private let providers: [any Geocoder]
     private let cooldown: TimeInterval
@@ -33,6 +34,9 @@ public actor FailoverGeocoder: Geocoder {
             } catch GeocodingError.invalidRequest {
                 throw GeocodingError.invalidRequest
             } catch {
+                // Providers report a cancelled request as an ordinary failure, so ask the task
+                // itself. Otherwise a torn-down sync would carry on to the next, possibly billed, provider.
+                try Task.checkCancellation()
                 lastError = error
                 if case GeocodingError.rateLimited = error {
                     cooldownUntil[index] = now().addingTimeInterval(cooldown)

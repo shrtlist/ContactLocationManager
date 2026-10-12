@@ -30,6 +30,8 @@ public final class ContactHistoryFetcher {
     @ObservationIgnored private let contactActor: ContactActor
     @ObservationIgnored private let limiter: RequestLimitedGeocoder
     @ObservationIgnored private var changeObserver: Task<Void, Never>?
+    @ObservationIgnored private var isFetching = false
+    @ObservationIgnored private var needsAnotherFetch = false
 
     @ObservationIgnored private var savedToken: Data? {
         get {
@@ -97,14 +99,32 @@ public final class ContactHistoryFetcher {
         await fetchChanges()
     }
 
+    /// One sync at a time. The token is only saved once a sync's changes are applied, so a sync
+    /// that started meanwhile would read the same changes again. A change that arrives during a
+    /// sync is picked up by another pass straight afterwards.
     private func fetchChanges() async {
+        guard !isFetching else {
+            needsAnotherFetch = true
+            return
+        }
+        isFetching = true
+        defer { isFetching = false }
+
+        repeat {
+            needsAnotherFetch = false
+            await fetchChangesOnce()
+        } while needsAnotherFetch
+    }
+
+    private func fetchChangesOnce() async {
         // At first launch, the token will be nil and all contacts will be retrieved as additions
         guard let (token, changes) = try? await Self.fetchHistory(startingToken: savedToken) else { return }
-        savedToken = token
         for (index, change) in changes.enumerated() {
             syncProgress = Double(index) / Double(changes.count)
             await contactActor.apply([change])
         }
+        // Saved after applying: if the app is killed mid-sync, the next launch reads these changes again.
+        savedToken = token
         syncProgress = nil
         contactLocations = await contactActor.fetchAll()
         isRateLimited = await limiter.didRefuse

@@ -108,6 +108,27 @@ private final class Clock: @unchecked Sendable {
     }
 }
 
+private struct CancelledSecondProviderGeocoder: Geocoder {
+    func coordinate(for address: CNPostalAddress) async throws -> CLLocationCoordinate2D? {
+        // Like URLSession and MapKit, report cancellation as an ordinary failure.
+        do { try await Task.sleep(for: .seconds(60)) } catch { throw GeocodingError.unavailable }
+        return nil
+    }
+}
+
+@Suite struct FailoverCancellationTests {
+    @Test func cancelledTaskDoesNotReachTheNextProvider() async {
+        let backup = StubGeocoder(.coordinate(2))
+        let geocoder = FailoverGeocoder(providers: [CancelledSecondProviderGeocoder(), backup])
+        let task = Task { try await geocoder.coordinate(for: address) }
+        try? await Task.sleep(for: .milliseconds(100))
+        task.cancel()
+
+        await #expect(throws: CancellationError.self) { try await task.value }
+        #expect(backup.calls == 0)
+    }
+}
+
 @Suite struct RequestLimitedGeocoderTests {
     private func makeDefaults() -> UserDefaults {
         let defaults = UserDefaults(suiteName: UUID().uuidString)!

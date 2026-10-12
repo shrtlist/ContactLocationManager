@@ -9,7 +9,10 @@
 import MapKit
 
 /// A geocoded postal address of a contact, ready to put on a map.
-public final class ContactLocationAnnotation: NSObject, MKAnnotation {
+///
+/// `@unchecked Sendable`: the compiler can't verify an `NSObject` subclass, but every stored
+/// property is an immutable `let`, so an instance is safe to hand across actors. Keep it that way.
+public final class ContactLocationAnnotation: NSObject, MKAnnotation, @unchecked Sendable {
     public let contact: CNContact
     public let labeledAddress: CNLabeledValue<CNPostalAddress>
 

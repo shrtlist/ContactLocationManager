@@ -23,12 +23,6 @@ public protocol Geocoder: Sendable {
     func coordinate(for address: CNPostalAddress) async throws -> CLLocationCoordinate2D?
 }
 
-extension CNPostalAddress {
-    var mailingString: String {
-        CNPostalAddressFormatter.string(from: self, style: .mailingAddress)
-    }
-}
-
 extension URLSession {
     /// Performs `request`, mapping transport and HTTP-level failures onto `GeocodingError`.
     func geocodingData(for request: URLRequest) async throws -> Data {

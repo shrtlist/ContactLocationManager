@@ -21,16 +21,47 @@ enum ContactHistoryChange: Sendable {
     case delete(contactIdentifier: String)
 }
 
+/// `CNKeyDescriptor`s are immutable, but aren't marked `Sendable`.
+struct ContactKeys: @unchecked Sendable {
+    let descriptors: [any CNKeyDescriptor]
+    init(_ descriptors: [any CNKeyDescriptor]) { self.descriptors = descriptors }
+}
+
 actor ContactActor {
     private let geocoder: any Geocoder
+    private let contactKeys: ContactKeys
 
-    init(geocoder: any Geocoder) {
+    init(geocoder: any Geocoder, contactKeys: ContactKeys) {
         self.geocoder = geocoder
+        self.contactKeys = contactKeys
     }
 
-    func fetchAll() async -> [ContactLocationSnapshot] {
-        await SkopelosClient.shared.readAsync { context in
-            ContactLocation.SK_all(context).map(ContactLocationSnapshot.init)
+    /// Builds an annotation for every stored location, looking up the contacts in one request.
+    /// Returns nil if that request fails.
+    func fetchAll() async -> [ContactLocationAnnotation]? {
+        let contactLocations = await SkopelosClient.shared.readAsync { context in
+            ContactLocation.SK_all(context)
+        }
+
+        guard !contactLocations.isEmpty else { return [] }
+
+        let fetchRequest = CNContactFetchRequest(keysToFetch: contactKeys.descriptors)
+
+        var contacts = [CNContact]()
+
+        do {
+            try CNContactStore().enumerateContacts(with: fetchRequest) { (contact, stopPointer) in
+                contacts.append(contact)
+            }
+        } catch {
+            print("contact fetch failed: \(error)")
+            return nil
+        }
+
+        return contactLocations.compactMap { contactLocation in
+            guard let contact = contacts.first(where: { $0.identifier == contactLocation.contactId }),
+                  let labeledAddress = contact.postalAddresses.first(where: { $0.identifier == contactLocation.postalAddressId }) else { return nil }
+            return ContactLocationAnnotation(contact: contact, labeledAddress: labeledAddress, latitude: contactLocation.latitude, longitude: contactLocation.longitude)
         }
     }
 
@@ -73,6 +104,8 @@ actor ContactActor {
             Self.delete(contactIdentifier: contactIdentifier, in: context)
         }
     }
+    
+    // MARK: - Private
 
     /// Geocodes each postal address of the contact, keyed by postal address identifier.
     /// Addresses that can't be geocoded are omitted.

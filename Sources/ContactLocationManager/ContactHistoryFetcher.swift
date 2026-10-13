@@ -14,12 +14,6 @@ import ContactsChangeHistory
 import CoreLocation
 import Observation
 
-/// `CNKeyDescriptor`s are immutable, but aren't marked `Sendable`.
-private struct ContactKeys: @unchecked Sendable {
-    let descriptors: [any CNKeyDescriptor]
-    init(_ descriptors: [any CNKeyDescriptor]) { self.descriptors = descriptors }
-}
-
 @MainActor
 @Observable
 public final class ContactHistoryFetcher {
@@ -36,7 +30,6 @@ public final class ContactHistoryFetcher {
     @ObservationIgnored private let savedTokenUserDefaultsKey = "CNContactHistoryChangeHistoryToken"
     @ObservationIgnored private let contactActor: ContactActor
     @ObservationIgnored private let limiter: RequestLimitedGeocoder
-    @ObservationIgnored private let contactKeys: ContactKeys
     @ObservationIgnored private var changeObserver: Task<Void, Never>?
     @ObservationIgnored private var isFetching = false
     @ObservationIgnored private var needsAnotherFetch = false
@@ -57,12 +50,14 @@ public final class ContactHistoryFetcher {
     /// limit. Contacts beyond it are skipped and `isRateLimited` becomes true.
     /// `contactKeys` are the contact properties each annotation's `contact` has loaded, on top of
     /// the postal addresses, which are always loaded. The default is the name, thumbnail and type.
-    public init(mapsiAPIKey: String? = nil, googleAPIKey: String? = nil, maxRequests: Int? = nil,
+    public init(mapsiAPIKey: String? = nil,
+                googleAPIKey: String? = nil,
+                maxRequests: Int? = nil,
                 contactKeys: [any CNKeyDescriptor] = ContactHistoryFetcher.defaultContactKeys) {
-        self.contactKeys = ContactKeys(contactKeys + [CNContactPostalAddressesKey as CNKeyDescriptor])
         let geocoder = GeocoderFactory.makeDefault(mapsiAPIKey: mapsiAPIKey, googleAPIKey: googleAPIKey)
         limiter = RequestLimitedGeocoder(base: geocoder, maxRequests: maxRequests)
-        contactActor = ContactActor(geocoder: limiter)
+        let keys = ContactKeys(contactKeys + [CNContactPostalAddressesKey as CNKeyDescriptor])
+        contactActor = ContactActor(geocoder: limiter, contactKeys: keys)
         authorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
         startIfAuthorized()
     }
@@ -146,37 +141,11 @@ public final class ContactHistoryFetcher {
         // Saved after applying: if the app is killed mid-sync, the next launch reads these changes again.
         savedToken = token
         syncProgress = nil
-        let snapshots = await contactActor.fetchAll()
         // If the contacts couldn't be read, keep what is on the map rather than blanking it.
-        if let annotations = await Self.makeAnnotations(from: snapshots, keys: contactKeys) {
+        if let annotations = await contactActor.fetchAll() {
             contactLocationAnnotations = annotations
         }
         isRateLimited = await limiter.didRefuse
-    }
-
-    /// Looks up each stored location's contact in one request and builds the annotations.
-    /// Returns nil if the request fails.
-    @concurrent
-    private static func makeAnnotations(from snapshots: [ContactLocationSnapshot], keys: ContactKeys) async -> sending [ContactLocationAnnotation]? {
-        guard !snapshots.isEmpty else { return [] }
-
-        let identifiers = Array(Set(snapshots.map(\.contactId)))
-        let predicate = CNContact.predicateForContacts(withIdentifiers: identifiers)
-
-        let contacts: [CNContact]
-        do {
-            contacts = try CNContactStore().unifiedContacts(matching: predicate, keysToFetch: keys.descriptors)
-        } catch {
-            print("contact fetch failed: \(error)")
-            return nil
-        }
-        let contactsById = Dictionary(contacts.map { ($0.identifier, $0) }, uniquingKeysWith: { first, _ in first })
-
-        return snapshots.compactMap { snapshot in
-            guard let contact = contactsById[snapshot.contactId],
-                  let address = contact.postalAddresses.first(where: { $0.identifier == snapshot.postalAddressId }) else { return nil }
-            return ContactLocationAnnotation(contact: contact, labeledAddress: address, latitude: snapshot.latitude, longitude: snapshot.longitude)
-        }
     }
 
     @concurrent

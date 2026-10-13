@@ -15,17 +15,12 @@ import MapKit
 public final class ContactLocationAnnotation: NSObject, MKAnnotation, @unchecked Sendable {
     public let contact: CNContact
     public let labeledAddress: CNLabeledValue<CNPostalAddress>
+    public let title: String?
+    public let subtitle: String?
 
     public var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
-
-    /// The contact's name, or their organization if they have no person name. `nil` if they have
-    /// neither. Needs the name keys (`givenName`, `familyName`, `organizationName`) to be loaded.
-    public let title: String?
-
-    /// The address, formatted as it would appear on a mailing label.
-    public let subtitle: String?
     
     private let latitude: CLLocationDegrees
     private let longitude: CLLocationDegrees
@@ -35,8 +30,8 @@ public final class ContactLocationAnnotation: NSObject, MKAnnotation, @unchecked
         self.labeledAddress = labeledAddress
         self.latitude = latitude
         self.longitude = longitude
-        title = contact.name
-        subtitle = CNPostalAddressFormatter.string(from: labeledAddress.value, style: .mailingAddress)
+        title = contact.formattedName
+        subtitle = labeledAddress.value.mailingString
             .trimmingCharacters(in: .whitespacesAndNewlines)
         super.init()
     }

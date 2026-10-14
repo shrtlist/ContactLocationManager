@@ -33,6 +33,7 @@ public final class ContactHistoryFetcher {
     @ObservationIgnored private var changeObserver: Task<Void, Never>?
     @ObservationIgnored private var isFetching = false
     @ObservationIgnored private var needsAnotherFetch = false
+    @ObservationIgnored private var startOver = false
 
     @ObservationIgnored private var savedToken: Data? {
         get {
@@ -97,52 +98,66 @@ public final class ContactHistoryFetcher {
         }
     }
 
+    /// Forgets every stored location. If a sync is running, it stops after the contact it is on
+    /// and the locations are cleared then, which may be after this returns.
     public func reset() async {
-        savedToken = nil
-        await contactActor.removeAll()
-        contactLocationAnnotations = []
+        startOver = true
+        await runSync()
     }
 
     /// Changes the request limit, for example when the user subscribes. If contacts were skipped
     /// under the old limit and the new one lets them through, everything is geocoded again.
+    /// If a sync is running, it stops after the contact it is on and the new one starts then,
+    /// which may be after this returns.
     public func setMaxRequests(_ maxRequests: Int?) async {
         guard await limiter.setMaxRequests(maxRequests) else { return }
         isRateLimited = false
-        savedToken = nil
-        await contactActor.removeAll()
-        contactLocationAnnotations = []
+        startOver = true
         await fetchChanges()
+    }
+
+    private func fetchChanges() async {
+        needsAnotherFetch = true
+        await runSync()
     }
 
     /// One sync at a time. The token is only saved once a sync's changes are applied, so a sync
     /// that started meanwhile would read the same changes again. A change that arrives during a
     /// sync is picked up by another pass straight afterwards.
-    private func fetchChanges() async {
-        guard !isFetching else {
-            needsAnotherFetch = true
-            return
-        }
+    /// Clearing also happens here, between passes, so it can't interleave with a running pass.
+    private func runSync() async {
+        guard !isFetching else { return }
         isFetching = true
         defer { isFetching = false }
 
-        repeat {
+        while startOver || needsAnotherFetch {
+            if startOver {
+                startOver = false
+                savedToken = nil
+                await contactActor.removeAll()
+                contactLocationAnnotations = []
+                continue
+            }
             needsAnotherFetch = false
             await fetchChangesOnce()
-        } while needsAnotherFetch
+        }
     }
 
+    /// Stops early, without saving the token or publishing, once a clear has been asked for.
     private func fetchChangesOnce() async {
         // At first launch, the token will be nil and all contacts will be retrieved as additions
-        guard let (token, changes) = try? await Self.fetchHistory(startingToken: savedToken) else { return }
+        guard let (token, changes) = try? await Self.fetchHistory(startingToken: savedToken), !startOver else { return }
+        defer { syncProgress = nil }
         for (index, change) in changes.enumerated() {
             syncProgress = Double(index) / Double(changes.count)
             await contactActor.apply([change])
+            guard !startOver else { return }
         }
         // Saved after applying: if the app is killed mid-sync, the next launch reads these changes again.
         savedToken = token
         syncProgress = nil
         // If the contacts couldn't be read, keep what is on the map rather than blanking it.
-        if let annotations = await contactActor.fetchAll() {
+        if let annotations = await contactActor.fetchAll(), !startOver {
             contactLocationAnnotations = annotations
         }
         isRateLimited = await limiter.didRefuse

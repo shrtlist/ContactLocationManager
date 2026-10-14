@@ -120,7 +120,7 @@ CNContactStore's change-history enumerator can't be called from Swift, so a smal
 - **Syncing starts at creation.** If access is already granted, the fetcher syncs immediately, even with no network connection. Create it once your app knows the network is up if that matters.
 - **Free users can reach paid providers.** The keys you pass apply to every request. If MapKit finds no match or fails, the address goes to Mapsi and Google, and still counts as one request. To keep a tier on MapKit only, don't pass it keys.
 - **Changing providers needs a new fetcher.** The provider chain is built once, when the fetcher is created.
-- **Overlapping syncs are not coordinated.** A second Contacts change that arrives during a long sync can start another sync while the first is running.
+- **`reset()` and `setMaxRequests(_:)` can return before they take effect.** If a sync is running, it stops after the contact it is on, and the stored locations are cleared then.
 - **Limited Contacts access** (`.limited`) is supported in code but has not been tested.
 - **No cache.** Every address is geocoded again after a `reset()`.
 

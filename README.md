@@ -87,13 +87,13 @@ let fetcher = ContactHistoryFetcher(
 )
 ```
 
-- The count is saved across launches. One address is one request, even if it falls through several providers. A request that fails with an error is not counted.
+- The count is saved across launches, and only `reset()` sets it back to zero. One address is one request, even if it falls through several providers. A request that fails with an error is not counted.
 - Once the cap is reached the remaining addresses are skipped without calling any provider, and `isRateLimited` becomes true. Showing an alert or a paywall is up to your app.
 - Call `await fetcher.setMaxRequests(nil)` (or a larger number) to change the cap, for example when the user subscribes. If addresses had been skipped and the new cap lets them through, the package clears its stored locations and sync token and geocodes everything again.
 
 ### Starting over
 
-`await fetcher.reset()` clears the sync token and the stored locations. The next change to the Contacts database, or the next launch, syncs everything again.
+`await fetcher.reset()` clears the sync token and the stored locations, sets the request count back to zero, and geocodes every contact again. Because the count starts over, a user under a cap gets the full allowance again.
 
 ### Using the geocoders on their own
 
@@ -110,9 +110,21 @@ let coordinate = try await geocoder.coordinate(for: postalAddress)  // nil if no
 
 1. The fetcher listens for `CNContactStoreDidChange` and asks Contacts for the changes since its saved history token.
 2. Each added or updated contact has its postal addresses geocoded. Deleted contacts have their locations removed.
-3. Results are written to the store, then `contactLocationAnnotations` is refreshed from it. The token is saved when the changes have been fetched.
+3. Results are written to the store, then `contactLocationAnnotations` is refreshed from it. The token is saved once the changes have been applied.
 
 CNContactStore's change-history enumerator can't be called from Swift, so a small Objective-C target (`ContactsChangeHistory`) wraps it.
+
+## Example app
+
+`Example/ContactLocationManagerExample.xcodeproj` is a small SwiftUI app for trying the package without a host app. It uses the package from this checkout, so local changes are picked up without pushing. It asks for Contacts access, runs the sync, and lists each location's name, address and coordinate. It also shows how many contacts and addresses are in the Contacts database, and lets you:
+
+- turn the Mapsi and Google geocoders on and off (MapKit is always tried first),
+- set a maximum number of requests,
+- reset, which clears the stored locations and geocodes every contact again.
+
+Mapsi and Google need keys. Put them in `Example/ContactLocationManagerExample/Keys.plist`, which git ignores, as strings named `MapsiAPIKey` and `GoogleMapsAPIKey`. Without the file the app still runs, using MapKit only.
+
+To run it on a device, choose your team under Signing & Capabilities.
 
 ## Known limitations
 
@@ -120,7 +132,7 @@ CNContactStore's change-history enumerator can't be called from Swift, so a smal
 - **Syncing starts at creation.** If access is already granted, the fetcher syncs immediately, even with no network connection. Create it once your app knows the network is up if that matters.
 - **Free users can reach paid providers.** The keys you pass apply to every request. If MapKit finds no match or fails, the address goes to Mapsi and Google, and still counts as one request. To keep a tier on MapKit only, don't pass it keys.
 - **Changing providers needs a new fetcher.** The provider chain is built once, when the fetcher is created.
-- **`reset()` and `setMaxRequests(_:)` can return before they take effect.** If a sync is running, it stops after the contact it is on, and the stored locations are cleared then.
+- **`reset()` and `setMaxRequests(_:)` can return before they take effect.** If a sync is running, it stops after the contact it is on, and the stored locations are cleared then. Otherwise they return once the new sync has finished.
 - **Limited Contacts access** (`.limited`) is supported in code but has not been tested.
 - **No cache.** Every address is geocoded again after a `reset()`.
 

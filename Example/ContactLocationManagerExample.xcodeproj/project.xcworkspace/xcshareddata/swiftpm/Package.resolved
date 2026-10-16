@@ -1,0 +1,15 @@
+{
+  "originHash" : "30f74f00242521118f9e7f8caec3b4d3ab6e1142a0a739539a5f517cb2a3f91a",
+  "pins" : [
+    {
+      "identity" : "skopelos",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/albertodebortoli/Skopelos.git",
+      "state" : {
+        "branch" : "master",
+        "revision" : "3d321b43e5091815755ffadae48b840e65fc3197"
+      }
+    }
+  ],
+  "version" : 3
+}

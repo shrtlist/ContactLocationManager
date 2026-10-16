@@ -30,14 +30,16 @@ struct ContentView: View {
                 }
 
                 Section {
-                    LabeledContent("MapKit", value: "Always first")
-                    // Shown off when there's no key, whatever the saved setting.
-                    Toggle("Mapsi", isOn: Binding(get: { model.usesMapsi && model.mapsiAPIKey != nil },
+                    Toggle("Mock geocoder", isOn: $model.usesMockGeocoder)
+                        .disabled(isSyncing)
+                    LabeledContent("MapKit", value: model.usesMockGeocoder ? "Off" : "Always first")
+                    // Shown off when there's no key or the mock is on, whatever the saved setting.
+                    Toggle("Mapsi", isOn: Binding(get: { model.usesMapsi && model.mapsiAPIKey != nil && !model.usesMockGeocoder },
                                                   set: { model.usesMapsi = $0 }))
-                        .disabled(model.mapsiAPIKey == nil || isSyncing)
-                    Toggle("Google", isOn: Binding(get: { model.usesGoogle && model.googleAPIKey != nil },
+                        .disabled(model.mapsiAPIKey == nil || model.usesMockGeocoder || isSyncing)
+                    Toggle("Google", isOn: Binding(get: { model.usesGoogle && model.googleAPIKey != nil && !model.usesMockGeocoder },
                                                    set: { model.usesGoogle = $0 }))
-                        .disabled(model.googleAPIKey == nil || isSyncing)
+                        .disabled(model.googleAPIKey == nil || model.usesMockGeocoder || isSyncing)
                     Toggle("Limit requests", isOn: $model.limitsRequests)
                     if model.limitsRequests {
                         Stepper("Max requests: \(model.maxRequests)", value: $model.maxRequests, in: 0...10_000)
@@ -49,7 +51,7 @@ struct ContentView: View {
                 } header: {
                     Text("Geocoding")
                 } footer: {
-                    Text("Mapsi and Google need keys in Keys.plist. Providers can't be switched during a sync, and only affect addresses geocoded from then on; reset to geocode everything again.")
+                    Text("The mock geocoder returns a random coordinate for each address, without the network. Mapsi and Google need keys in Keys.plist. Geocoders can't be switched during a sync, and only affect addresses geocoded from then on; reset to geocode everything again.")
                 }
 
                 Section("Sync") {

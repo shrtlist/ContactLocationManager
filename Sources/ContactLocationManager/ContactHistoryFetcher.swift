@@ -51,11 +51,20 @@ public final class ContactHistoryFetcher {
     /// limit. Contacts beyond it are skipped and `isRateLimited` becomes true.
     /// `contactKeys` are the contact properties each annotation's `contact` has loaded, on top of
     /// the postal addresses, which are always loaded. The default is the name, thumbnail and type.
-    public init(mapsiAPIKey: String? = nil,
-                googleAPIKey: String? = nil,
+    public convenience init(mapsiAPIKey: String? = nil,
+                            googleAPIKey: String? = nil,
+                            maxRequests: Int? = nil,
+                            contactKeys: [any CNKeyDescriptor] = ContactHistoryFetcher.defaultContactKeys) {
+        self.init(geocoder: GeocoderFactory.makeDefault(mapsiAPIKey: mapsiAPIKey, googleAPIKey: googleAPIKey),
+                  maxRequests: maxRequests,
+                  contactKeys: contactKeys)
+    }
+
+    /// Like `init(mapsiAPIKey:googleAPIKey:maxRequests:contactKeys:)`, but geocodes with the given
+    /// geocoder instead of the MapKit, Mapsi and Google chain, for example a mock for testing.
+    public init(geocoder: any Geocoder,
                 maxRequests: Int? = nil,
                 contactKeys: [any CNKeyDescriptor] = ContactHistoryFetcher.defaultContactKeys) {
-        let geocoder = GeocoderFactory.makeDefault(mapsiAPIKey: mapsiAPIKey, googleAPIKey: googleAPIKey)
         limiter = RequestLimitedGeocoder(base: geocoder, maxRequests: maxRequests)
         let keys = ContactKeys(contactKeys + [CNContactPostalAddressesKey as CNKeyDescriptor])
         contactActor = ContactActor(geocoder: limiter, contactKeys: keys)

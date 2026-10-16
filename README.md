@@ -106,6 +106,12 @@ let coordinate = try await geocoder.coordinate(for: postalAddress)  // nil if no
 
 `coordinate(for:)` throws a `GeocodingError` (`rateLimited`, `unavailable`, `unauthorized` or `invalidRequest`). `FailoverGeocoder` fails over on every error except `invalidRequest`, and skips a provider for 60 seconds after it reports `rateLimited`.
 
+To make the fetcher use your own geocoder, for example a mock in tests, pass anything that conforms to `Geocoder` instead of keys:
+
+```swift
+let fetcher = ContactHistoryFetcher(geocoder: MyGeocoder(), maxRequests: 20)
+```
+
 ## How it works
 
 1. The fetcher listens for `CNContactStoreDidChange` and asks Contacts for the changes since its saved history token.
@@ -119,6 +125,7 @@ CNContactStore's change-history enumerator can't be called from Swift, so a smal
 `Example/ContactLocationManagerExample.xcodeproj` is a small SwiftUI app for trying the package without a host app. It uses the package from this checkout, so local changes are picked up without pushing. It asks for Contacts access, runs the sync, and lists each location's name, address and coordinate. It also shows how many contacts and addresses are in the Contacts database, and lets you:
 
 - turn the Mapsi and Google geocoders on and off (MapKit is always tried first),
+- switch to a mock geocoder that returns a random coordinate for each address, for when there's no network,
 - set a maximum number of requests,
 - reset, which clears the stored locations and geocodes every contact again.
 

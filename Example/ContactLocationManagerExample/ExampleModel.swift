@@ -14,13 +14,17 @@ import ContactLocationManager
 @MainActor
 @Observable
 final class ExampleModel {
-    /// Replaced when a provider is switched on or off, since providers are fixed at creation.
+    /// Replaced when the geocoders change, since they're fixed at creation.
     private(set) var fetcher: ContactHistoryFetcher
 
     /// Read from Keys.plist; nil if it's missing or has no such key.
     let mapsiAPIKey: String?
     let googleAPIKey: String?
 
+    /// Random coordinates instead of real geocoding, for when there's no network.
+    var usesMockGeocoder: Bool {
+        didSet { save(usesMockGeocoder, for: "usesMockGeocoder"); makeFetcher() }
+    }
     var usesMapsi: Bool {
         didSet { save(usesMapsi, for: "usesMapsi"); makeFetcher() }
     }
@@ -41,15 +45,18 @@ final class ExampleModel {
     init() {
         let defaults = UserDefaults.standard
         defaults.register(defaults: ["usesMapsi": true, "usesGoogle": true, "maxRequests": 20])
+        let usesMockGeocoder = defaults.bool(forKey: "usesMockGeocoder")
         let usesMapsi = defaults.bool(forKey: "usesMapsi")
         let usesGoogle = defaults.bool(forKey: "usesGoogle")
         let limitsRequests = defaults.bool(forKey: "limitsRequests")
         let maxRequests = defaults.integer(forKey: "maxRequests")
         let mapsiAPIKey = Self.key("MapsiAPIKey")
         let googleAPIKey = Self.key("GoogleMapsAPIKey")
-        fetcher = ContactHistoryFetcher(mapsiAPIKey: usesMapsi ? mapsiAPIKey : nil,
-                                        googleAPIKey: usesGoogle ? googleAPIKey : nil,
-                                        maxRequests: limitsRequests ? maxRequests : nil)
+        fetcher = Self.makeFetcher(usesMockGeocoder: usesMockGeocoder,
+                                   mapsiAPIKey: usesMapsi ? mapsiAPIKey : nil,
+                                   googleAPIKey: usesGoogle ? googleAPIKey : nil,
+                                   maxRequests: limitsRequests ? maxRequests : nil)
+        self.usesMockGeocoder = usesMockGeocoder
         self.usesMapsi = usesMapsi
         self.usesGoogle = usesGoogle
         self.limitsRequests = limitsRequests
@@ -68,9 +75,18 @@ final class ExampleModel {
 
     /// The old fetcher should be idle; the view only allows switching providers between syncs.
     private func makeFetcher() {
-        fetcher = ContactHistoryFetcher(mapsiAPIKey: usesMapsi ? mapsiAPIKey : nil,
-                                        googleAPIKey: usesGoogle ? googleAPIKey : nil,
-                                        maxRequests: requestLimit)
+        fetcher = Self.makeFetcher(usesMockGeocoder: usesMockGeocoder,
+                                   mapsiAPIKey: usesMapsi ? mapsiAPIKey : nil,
+                                   googleAPIKey: usesGoogle ? googleAPIKey : nil,
+                                   maxRequests: requestLimit)
+    }
+
+    private static func makeFetcher(usesMockGeocoder: Bool, mapsiAPIKey: String?, googleAPIKey: String?,
+                                    maxRequests: Int?) -> ContactHistoryFetcher {
+        if usesMockGeocoder {
+            return ContactHistoryFetcher(geocoder: MockGeocoder(), maxRequests: maxRequests)
+        }
+        return ContactHistoryFetcher(mapsiAPIKey: mapsiAPIKey, googleAPIKey: googleAPIKey, maxRequests: maxRequests)
     }
 
     private func applyRequestLimit() {

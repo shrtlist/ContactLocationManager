@@ -48,6 +48,12 @@ actor RequestLimitedGeocoder: Geocoder {
         }
     }
 
+    /// Starts counting from zero again.
+    func resetCount() {
+        count = 0
+        defaults.set(false, forKey: refusedKey)
+    }
+
     /// Returns true if requests had been refused and the new limit lets them through now,
     /// meaning the refused addresses need geocoding again.
     func setMaxRequests(_ newValue: Int?) -> Bool {

@@ -171,6 +171,16 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
         _ = try await geocoder.coordinate(for: address)
     }
 
+    @Test func resetCountAllowsRequestsAgain() async throws {
+        let geocoder = RequestLimitedGeocoder(base: StubGeocoder(.coordinate(1)), maxRequests: 1, defaults: makeDefaults())
+        _ = try await geocoder.coordinate(for: address)
+        _ = try? await geocoder.coordinate(for: address)
+
+        await geocoder.resetCount()
+        #expect(await !geocoder.didRefuse)
+        _ = try await geocoder.coordinate(for: address)
+    }
+
     @Test func raisingTheLimitWithoutARefusalNeedsNoResync() async throws {
         let geocoder = RequestLimitedGeocoder(base: StubGeocoder(.coordinate(1)), maxRequests: 5, defaults: makeDefaults())
         _ = try await geocoder.coordinate(for: address)

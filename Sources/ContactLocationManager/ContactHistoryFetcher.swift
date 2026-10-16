@@ -98,11 +98,14 @@ public final class ContactHistoryFetcher {
         }
     }
 
-    /// Forgets every stored location. If a sync is running, it stops after the contact it is on
-    /// and the locations are cleared then, which may be after this returns.
+    /// Forgets every stored location, starts the request count from zero and geocodes every
+    /// contact again. If a sync is running, it stops after the contact it is on and the new one
+    /// starts then, which may be after this returns.
     public func reset() async {
+        await limiter.resetCount()
+        isRateLimited = false
         startOver = true
-        await runSync()
+        await fetchChanges()
     }
 
     /// Changes the request limit, for example when the user subscribes. If contacts were skipped

@@ -105,7 +105,7 @@ actor ContactActor {
         }
     }
     
-    // MARK: - Private
+    // MARK: - Private API
 
     /// Geocodes each postal address of the contact, keyed by postal address identifier.
     /// Addresses that can't be geocoded are omitted.

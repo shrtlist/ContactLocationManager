@@ -17,7 +17,8 @@ import Observation
 @MainActor
 @Observable
 public final class ContactHistoryFetcher {
-    public private(set) var contactLocationAnnotations: [ContactLocationAnnotation] = []
+    // `internal(set)` so tests can seed annotations without a contact store.
+    public internal(set) var contactLocationAnnotations: [ContactLocationAnnotation] = []
     public private(set) var authorizationStatus: CNAuthorizationStatus
 
     /// 0...1 while contacts are being processed, `nil` when idle.
@@ -89,22 +90,8 @@ public final class ContactHistoryFetcher {
         startIfAuthorized()
     }
 
-    private func startIfAuthorized() {
-        guard authorizationStatus == .authorized || authorizationStatus == .limited,
-              changeObserver == nil else { return }
-        observeContactStore()
-        Task { await fetchChanges() }
-    }
-
-    /// Responds to `CNContactStoreDidChange`, for example if a contact has been changed on another device.
-    /// The task ends once the fetcher is deallocated.
-    private func observeContactStore() {
-        changeObserver = Task { [weak self] in
-            for await _ in NotificationCenter.default.notifications(named: .CNContactStoreDidChange) {
-                guard let self else { break }
-                await self.fetchChanges()
-            }
-        }
+    public func fetchBy(_ postalAddress: CNLabeledValue<CNPostalAddress>, contact: CNContact) -> ContactLocationAnnotation? {
+        contactLocationAnnotations.first(where: { $0.contact == contact && $0.labeledAddress == postalAddress })
     }
 
     /// Forgets every stored location, starts the request count from zero and geocodes every
@@ -126,6 +113,26 @@ public final class ContactHistoryFetcher {
         isRateLimited = false
         startOver = true
         await fetchChanges()
+    }
+
+    // MARK: - Private API
+
+    private func startIfAuthorized() {
+        guard authorizationStatus == .authorized || authorizationStatus == .limited,
+              changeObserver == nil else { return }
+        observeContactStore()
+        Task { await fetchChanges() }
+    }
+
+    /// Responds to `CNContactStoreDidChange`, for example if a contact has been changed on another device.
+    /// The task ends once the fetcher is deallocated.
+    private func observeContactStore() {
+        changeObserver = Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: .CNContactStoreDidChange) {
+                guard let self else { break }
+                await self.fetchChanges()
+            }
+        }
     }
 
     private func fetchChanges() async {

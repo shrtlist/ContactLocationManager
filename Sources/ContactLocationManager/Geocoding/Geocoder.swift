@@ -16,16 +16,18 @@ public enum GeocodingError: Error, Sendable {
     case unauthorized
     /// The address itself is malformed. Every provider would reject it, so don't fail over.
     case invalidRequest
+    /// The calling task was cancelled before an answer arrived.
+    case cancelled
 }
 
 public protocol Geocoder: Sendable {
     /// Returns nil when the address has no match. Throws `GeocodingError` on service failure.
-    func coordinate(for address: CNPostalAddress) async throws -> CLLocationCoordinate2D?
+    func coordinate(for address: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D?
 }
 
 extension URLSession {
     /// Performs `request`, mapping transport and HTTP-level failures onto `GeocodingError`.
-    func geocodingData(for request: URLRequest) async throws -> Data {
+    func geocodingData(for request: URLRequest) async throws(GeocodingError) -> Data {
         let data: Data
         let response: URLResponse
         do {

@@ -12,6 +12,7 @@
 import CoreData
 @preconcurrency import Contacts
 import MapKit
+import OSLog
 
 /// A single change reported by the contact store's change history.
 enum ContactHistoryChange: Sendable {
@@ -54,7 +55,7 @@ actor ContactActor {
                 contacts.append(contact)
             }
         } catch {
-            print("contact fetch failed: \(error)")
+            Logger.contacts.error("Contact fetch failed: \(error, privacy: .public)")
             return nil
         }
 
@@ -123,7 +124,8 @@ actor ContactActor {
         do {
             return try await geocoder.coordinate(for: address)
         } catch {
-            print("geocoding failure for \(address.mailingString): \(error)")
+            // The address is personal data, so it stays redacted in the unified log.
+            Logger.geocoding.error("Geocoding failure for \(address.mailingString, privacy: .private): \(error, privacy: .public)")
             return nil
         }
     }

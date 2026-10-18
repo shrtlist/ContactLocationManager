@@ -7,6 +7,7 @@
 //
 
 import CoreData
+import OSLog
 import Skopelos
 
 extension Skopelos {
@@ -32,6 +33,6 @@ final class SkopelosClient: Skopelos, @unchecked Sendable {
     static let shared = SkopelosClient(sqliteStack: modelURL, allowsConcurrentWritings: false)
     override func handleError(_ error: NSError) {
         // clients should do the right thing here
-        NSLog("\(#function) \(error.localizedDescription)")
+        Logger.persistence.error("Skopelos error: \(error.localizedDescription, privacy: .public)")
     }
 }

@@ -28,18 +28,18 @@ public struct GoogleGeocoder: Geocoder {
         let results: [Result]?
     }
 
-    public func coordinate(for address: CNPostalAddress) async throws -> CLLocationCoordinate2D? {
-        var components = URLComponents(string: "https://maps.googleapis.com/maps/api/geocode/json")!
-        components.queryItems = [
+    public func coordinate(for address: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
+        let endpoint = URL(string: "https://maps.googleapis.com/maps/api/geocode/json")!
+        let url = endpoint.appending(queryItems: [
             URLQueryItem(name: "address", value: address.mailingString),
             URLQueryItem(name: "key", value: apiKey),
-        ]
-        let data = try await session.geocodingData(for: URLRequest(url: components.url!))
+        ])
+        let data = try await session.geocodingData(for: URLRequest(url: url))
         return try Self.parse(data)
     }
 
     /// Google reports failures inside an HTTP 200 body, so the `status` field decides the outcome.
-    static func parse(_ data: Data) throws -> CLLocationCoordinate2D? {
+    static func parse(_ data: Data) throws(GeocodingError) -> CLLocationCoordinate2D? {
         guard let response = try? JSONDecoder().decode(Response.self, from: data) else {
             throw GeocodingError.unavailable
         }

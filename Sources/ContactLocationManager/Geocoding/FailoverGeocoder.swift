@@ -9,41 +9,47 @@ import CoreLocation
 /// Tries each provider in order and returns the first coordinate found.
 ///
 /// Fails over on no-match and on recoverable errors, but not on `.invalidRequest`.
-/// A provider that reports `.rateLimited` is skipped for `cooldown` seconds.
+/// A provider that reports `.rateLimited` is skipped for `cooldown`, measured on `clock`.
 /// Stops without trying further providers once the calling task is cancelled.
-public actor FailoverGeocoder: Geocoder {
+public actor FailoverGeocoder<C: Clock>: Geocoder where C.Duration == Duration {
     private let providers: [any Geocoder]
-    private let cooldown: TimeInterval
-    private let now: @Sendable () -> Date
-    private var cooldownUntil: [Int: Date] = [:]
+    private let cooldown: Duration
+    private let clock: C
+    private var cooldownUntil: [Int: C.Instant] = [:]
 
-    public init(providers: [any Geocoder], cooldown: TimeInterval = 60, now: @escaping @Sendable () -> Date = { Date() }) {
+    public init(providers: [any Geocoder], cooldown: Duration = .seconds(60), clock: C) {
         self.providers = providers
         self.cooldown = cooldown
-        self.now = now
+        self.clock = clock
     }
 
-    public func coordinate(for address: CNPostalAddress) async throws -> CLLocationCoordinate2D? {
-        var lastError: Error?
+    public func coordinate(for address: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
+        var lastError: GeocodingError?
         for (index, provider) in providers.enumerated() {
-            if let until = cooldownUntil[index], until > now() { continue }
-            do {
+            if let until = cooldownUntil[index], until > clock.now { continue }
+            do throws(GeocodingError) {
                 if let coordinate = try await provider.coordinate(for: address) {
                     return coordinate
                 }
-            } catch GeocodingError.invalidRequest {
-                throw GeocodingError.invalidRequest
+            } catch .invalidRequest {
+                throw .invalidRequest
             } catch {
                 // Providers report a cancelled request as an ordinary failure, so ask the task
                 // itself. Otherwise a torn-down sync would carry on to the next, possibly billed, provider.
-                try Task.checkCancellation()
+                if Task.isCancelled { throw .cancelled }
                 lastError = error
-                if case GeocodingError.rateLimited = error {
-                    cooldownUntil[index] = now().addingTimeInterval(cooldown)
+                if error == .rateLimited {
+                    cooldownUntil[index] = clock.now.advanced(by: cooldown)
                 }
             }
         }
         if let lastError { throw lastError }
         return nil
+    }
+}
+
+public extension FailoverGeocoder where C == ContinuousClock {
+    init(providers: [any Geocoder], cooldown: Duration = .seconds(60)) {
+        self.init(providers: providers, cooldown: cooldown, clock: ContinuousClock())
     }
 }

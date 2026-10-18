@@ -104,7 +104,7 @@ let geocoder = FailoverGeocoder(providers: [MapKitGeocoder(), MapsiGeocoder(apiK
 let coordinate = try await geocoder.coordinate(for: postalAddress)  // nil if no match
 ```
 
-`coordinate(for:)` throws a `GeocodingError` (`rateLimited`, `unavailable`, `unauthorized` or `invalidRequest`). `FailoverGeocoder` fails over on every error except `invalidRequest`, and skips a provider for 60 seconds after it reports `rateLimited`.
+`coordinate(for:)` throws a `GeocodingError` (`rateLimited`, `unavailable`, `unauthorized`, `invalidRequest` or `cancelled`), declared as typed throws. `FailoverGeocoder` fails over on every error except `invalidRequest`, and skips a provider for 60 seconds after it reports `rateLimited`.
 
 To make the fetcher use your own geocoder, for example a mock in tests, pass anything that conforms to `Geocoder` instead of keys:
 

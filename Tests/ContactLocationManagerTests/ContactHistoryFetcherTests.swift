@@ -5,7 +5,7 @@ import CoreLocation
 
 /// Never called: these tests seed annotations directly instead of syncing the contact store.
 private struct NoopGeocoder: Geocoder {
-    func coordinate(for address: CNPostalAddress) async throws -> CLLocationCoordinate2D? { nil }
+    func coordinate(for address: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? { nil }
 }
 
 @MainActor

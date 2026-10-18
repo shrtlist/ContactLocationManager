@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import OSLog
 
 enum GeocoderFactory {
     /// MapKit, then Mapsi, then Google. Providers without a key are left out, so with no
@@ -18,12 +19,12 @@ enum GeocoderFactory {
         if let key = mapsiAPIKey, !key.isEmpty {
             providers.append(MapsiGeocoder(apiKey: key, session: session))
         } else {
-            print("Geocoding: no Mapsi API key, skipping Mapsi")
+            Logger.geocoding.info("No Mapsi API key, skipping Mapsi")
         }
         if let key = googleAPIKey, !key.isEmpty {
             providers.append(GoogleGeocoder(apiKey: key, session: session))
         } else {
-            print("Geocoding: no Google API key, skipping Google")
+            Logger.geocoding.info("No Google API key, skipping Google")
         }
 
         return FailoverGeocoder(providers: providers)

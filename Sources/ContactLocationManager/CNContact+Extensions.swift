@@ -11,7 +11,7 @@ extension CNContact {
     var formattedName: String? {
         if !givenName.isEmpty || !familyName.isEmpty {
             let components = PersonNameComponents(givenName: givenName, familyName: familyName)
-            return PersonNameComponentsFormatter().string(from: components)
+            return components.formatted()
         }
         return organizationName.isEmpty ? nil : organizationName
     }

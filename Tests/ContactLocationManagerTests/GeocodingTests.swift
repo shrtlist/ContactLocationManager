@@ -2,17 +2,19 @@ import Testing
 import Contacts
 import CoreLocation
 import MapKit
+import Synchronization
 @testable import ContactLocationManager
 
-private final class StubGeocoder: Geocoder, @unchecked Sendable {
-    enum Outcome { case coordinate(Double), noMatch, failure(GeocodingError) }
+private final class StubGeocoder: Geocoder {
+    enum Outcome: Sendable { case coordinate(Double), noMatch, failure(GeocodingError) }
     let outcome: Outcome
-    private(set) var calls = 0
+    private let callCount = Mutex(0)
+    var calls: Int { callCount.withLock { $0 } }
 
     init(_ outcome: Outcome) { self.outcome = outcome }
 
-    func coordinate(for address: CNPostalAddress) async throws -> CLLocationCoordinate2D? {
-        calls += 1
+    func coordinate(for address: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
+        callCount.withLock { $0 += 1 }
         switch outcome {
         case .coordinate(let value): return CLLocationCoordinate2D(latitude: value, longitude: value)
         case .noMatch: return nil
@@ -39,7 +41,7 @@ private let address = CNPostalAddress()
 
     @Test func invalidRequestDoesNotFailOver() async {
         let first = StubGeocoder(.failure(.invalidRequest)), second = StubGeocoder(.coordinate(2))
-        await #expect(throws: GeocodingError.self) {
+        await #expect(throws: GeocodingError.invalidRequest) {
             try await FailoverGeocoder(providers: [first, second]).coordinate(for: address)
         }
         #expect(second.calls == 0)
@@ -53,29 +55,44 @@ private let address = CNPostalAddress()
 
     @Test func rethrowsLastErrorWhenNothingMatches() async {
         let providers: [StubGeocoder] = [.init(.noMatch), .init(.failure(.unauthorized))]
-        await #expect(throws: GeocodingError.self) {
+        await #expect(throws: GeocodingError.unauthorized) {
             try await FailoverGeocoder(providers: providers).coordinate(for: address)
         }
     }
 
     @Test func rateLimitedProviderIsSkippedUntilCooldownEnds() async throws {
         let limited = StubGeocoder(.failure(.rateLimited)), backup = StubGeocoder(.coordinate(2))
-        let clock = Clock(Date(timeIntervalSince1970: 0))
-        let geocoder = FailoverGeocoder(providers: [limited, backup], cooldown: 60, now: { clock.date })
+        let clock = ManualClock()
+        let geocoder = FailoverGeocoder(providers: [limited, backup], cooldown: .seconds(60), clock: clock)
 
         _ = try await geocoder.coordinate(for: address)
         _ = try await geocoder.coordinate(for: address)
         #expect(limited.calls == 1)
 
-        clock.date = Date(timeIntervalSince1970: 61)
+        clock.advance(by: .seconds(61))
         _ = try await geocoder.coordinate(for: address)
         #expect(limited.calls == 2)
     }
 }
 
-private final class Clock: @unchecked Sendable {
-    var date: Date
-    init(_ date: Date) { self.date = date }
+private struct ManualInstant: InstantProtocol {
+    var offset: Duration
+
+    func advanced(by duration: Duration) -> ManualInstant { ManualInstant(offset: offset + duration) }
+    func duration(to other: ManualInstant) -> Duration { other.offset - offset }
+    static func < (lhs: ManualInstant, rhs: ManualInstant) -> Bool { lhs.offset < rhs.offset }
+}
+
+private final class ManualClock: Clock, Sendable {
+    typealias Duration = Swift.Duration
+    private let elapsed = Mutex(Duration.zero)
+
+    var now: ManualInstant { ManualInstant(offset: elapsed.withLock { $0 }) }
+    var minimumResolution: Duration { .zero }
+
+    func advance(by duration: Duration) { elapsed.withLock { $0 += duration } }
+
+    func sleep(until deadline: ManualInstant, tolerance: Duration?) async throws {}
 }
 
 @Suite struct ResponseParsingTests {
@@ -92,26 +109,27 @@ private final class Clock: @unchecked Sendable {
         #expect(c?.latitude == 37.4 && c?.longitude == -122.1)
     }
 
-    @Test func googleStatuses() throws {
+    @Test func googleZeroResultsIsNoMatch() throws {
         #expect(try GoogleGeocoder.parse(Data(#"{"status":"ZERO_RESULTS","results":[]}"#.utf8)) == nil)
-        for (status, expected) in [("OVER_QUERY_LIMIT", GeocodingError.rateLimited),
-                                   ("REQUEST_DENIED", .unauthorized),
-                                   ("INVALID_REQUEST", .invalidRequest),
-                                   ("UNKNOWN_ERROR", .unavailable)] {
-            do {
-                _ = try GoogleGeocoder.parse(Data(#"{"status":"\#(status)"}"#.utf8))
-                Issue.record("\(status) should throw")
-            } catch let error as GeocodingError {
-                #expect(error == expected)
-            }
+    }
+
+    @Test(arguments: [
+        ("OVER_QUERY_LIMIT", GeocodingError.rateLimited),
+        ("REQUEST_DENIED", .unauthorized),
+        ("INVALID_REQUEST", .invalidRequest),
+        ("UNKNOWN_ERROR", .unavailable),
+    ])
+    func googleErrorStatuses(status: String, expected: GeocodingError) {
+        #expect(throws: expected) {
+            try GoogleGeocoder.parse(Data(#"{"status":"\#(status)"}"#.utf8))
         }
     }
 }
 
 private struct CancelledSecondProviderGeocoder: Geocoder {
-    func coordinate(for address: CNPostalAddress) async throws -> CLLocationCoordinate2D? {
+    func coordinate(for address: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
         // Like URLSession and MapKit, report cancellation as an ordinary failure.
-        do { try await Task.sleep(for: .seconds(60)) } catch { throw GeocodingError.unavailable }
+        do { try await Task.sleep(for: .seconds(60)) } catch { throw .unavailable }
         return nil
     }
 }
@@ -124,7 +142,7 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
         try? await Task.sleep(for: .milliseconds(100))
         task.cancel()
 
-        await #expect(throws: CancellationError.self) { try await task.value }
+        await #expect(throws: GeocodingError.cancelled) { try await task.value }
         #expect(backup.calls == 0)
     }
 }
@@ -140,7 +158,7 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
         let geocoder = RequestLimitedGeocoder(base: base, maxRequests: 2, defaults: makeDefaults())
         _ = try await geocoder.coordinate(for: address)
         _ = try await geocoder.coordinate(for: address)
-        await #expect(throws: GeocodingError.self) { try await geocoder.coordinate(for: address) }
+        await #expect(throws: GeocodingError.rateLimited) { try await geocoder.coordinate(for: address) }
         #expect(base.calls == 2)
         #expect(await geocoder.didRefuse)
     }
@@ -154,7 +172,7 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
     @Test func failedRequestsDontCount() async throws {
         let geocoder = RequestLimitedGeocoder(base: StubGeocoder(.failure(.unavailable)), maxRequests: 1, defaults: makeDefaults())
         for _ in 0..<3 {
-            await #expect(throws: GeocodingError.self) { try await geocoder.coordinate(for: address) }
+            await #expect(throws: GeocodingError.unavailable) { try await geocoder.coordinate(for: address) }
         }
         #expect(await !geocoder.didRefuse)
     }

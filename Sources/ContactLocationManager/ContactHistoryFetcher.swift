@@ -31,7 +31,6 @@ public final class ContactHistoryFetcher {
     @ObservationIgnored private let savedTokenUserDefaultsKey = "CNContactHistoryChangeHistoryToken"
     @ObservationIgnored private let contactActor: ContactActor
     @ObservationIgnored private let limiter: RequestLimitedGeocoder
-    @ObservationIgnored private var changeObserver: Task<Void, Never>?
     @ObservationIgnored private var isFetching = false
     @ObservationIgnored private var needsAnotherFetch = false
     @ObservationIgnored private var startOver = false
@@ -47,6 +46,7 @@ public final class ContactHistoryFetcher {
 
     /// Starts loading contacts right away if access has already been granted. Otherwise the host
     /// calls `requestAccess()` when it's ready to show the system prompt.
+    /// After that first load, contacts are only read again when the host calls `fetchChanges()`.
     /// Geocoding tries MapKit first, then Mapsi, then Google. A provider without a key is left out.
     /// `maxRequests` is the total number of addresses that will ever be geocoded, or `nil` for no
     /// limit. Contacts beyond it are skipped and `isRateLimited` becomes true.
@@ -90,6 +90,18 @@ public final class ContactHistoryFetcher {
         startIfAuthorized()
     }
 
+    /// Asks Contacts for the changes since the last sync and applies them. Does nothing until
+    /// access has been granted.
+    ///
+    /// The fetcher doesn't watch for `CNContactStoreDidChange` itself, so the host decides when to
+    /// sync, for example when the app becomes active or while it listens for that notification.
+    /// Calls that overlap are folded together: a call made during a sync returns at once, and the
+    /// running sync reads the changes again straight afterwards.
+    public func fetchChanges() async {
+        guard hasAccess else { return }
+        await requestSync()
+    }
+
     public func fetchBy(_ postalAddress: CNLabeledValue<CNPostalAddress>, contact: CNContact) -> ContactLocationAnnotation? {
         contactLocationAnnotations.first(where: { $0.contact == contact && $0.labeledAddress == postalAddress })
     }
@@ -101,7 +113,7 @@ public final class ContactHistoryFetcher {
         await limiter.resetCount()
         isRateLimited = false
         startOver = true
-        await fetchChanges()
+        await requestSync()
     }
 
     /// Changes the request limit, for example when the user subscribes. If contacts were skipped
@@ -112,30 +124,21 @@ public final class ContactHistoryFetcher {
         guard await limiter.setMaxRequests(maxRequests) else { return }
         isRateLimited = false
         startOver = true
-        await fetchChanges()
+        await requestSync()
     }
 
     // MARK: - Private API
 
+    private var hasAccess: Bool {
+        authorizationStatus == .authorized || authorizationStatus == .limited
+    }
+
     private func startIfAuthorized() {
-        guard authorizationStatus == .authorized || authorizationStatus == .limited,
-              changeObserver == nil else { return }
-        observeContactStore()
-        Task { await fetchChanges() }
+        guard hasAccess else { return }
+        Task { await requestSync() }
     }
 
-    /// Responds to `CNContactStoreDidChange`, for example if a contact has been changed on another device.
-    /// The task ends once the fetcher is deallocated.
-    private func observeContactStore() {
-        changeObserver = Task { [weak self] in
-            for await _ in NotificationCenter.default.notifications(named: .CNContactStoreDidChange) {
-                guard let self else { break }
-                await self.fetchChanges()
-            }
-        }
-    }
-
-    private func fetchChanges() async {
+    private func requestSync() async {
         needsAnotherFetch = true
         await runSync()
     }

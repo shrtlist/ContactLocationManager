@@ -114,7 +114,7 @@ let fetcher = ContactHistoryFetcher(geocoder: MyGeocoder(), maxRequests: 20)
 
 ## How it works
 
-1. The fetcher listens for `CNContactStoreDidChange` and asks Contacts for the changes since its saved history token.
+1. When it starts, and whenever the host calls `fetchChanges()`, the fetcher asks Contacts for the changes since its saved history token. It doesn't listen for `CNContactStoreDidChange` itself: the host decides when to sync, for example when the app becomes active, and while it is active when that notification arrives.
 2. Each added or updated contact has its postal addresses geocoded. Deleted contacts have their locations removed.
 3. Results are written to the store, then `contactLocationAnnotations` is refreshed from it. The token is saved once the changes have been applied.
 

@@ -55,6 +55,10 @@ struct ContentView: View {
                 }
 
                 Section("Sync") {
+                    if fetcher.isOffline {
+                        Text("Offline, waiting to resume")
+                            .foregroundStyle(.orange)
+                    }
                     if let progress = fetcher.syncProgress {
                         ProgressView(value: progress)
                     }

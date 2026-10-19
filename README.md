@@ -55,6 +55,7 @@ If access has already been granted, the fetcher starts syncing as soon as it is 
 | `authorizationStatus: CNAuthorizationStatus` | The current Contacts permission. |
 | `syncProgress: Double?` | 0...1 while contacts are being processed, `nil` when idle. Counts contacts, not addresses. |
 | `isRateLimited: Bool` | True when addresses were skipped because the request limit was reached. |
+| `isOffline: Bool` | True while a sync is paused because the network is down. It resumes by itself when connectivity returns. |
 
 ### Observing from UIKit
 
@@ -117,6 +118,7 @@ let fetcher = ContactHistoryFetcher(geocoder: MyGeocoder(), maxRequests: 20)
 1. When it starts, and whenever the host calls `fetchChanges()`, the fetcher asks Contacts for the changes since its saved history token. It doesn't listen for `CNContactStoreDidChange` itself: the host decides when to sync, for example when the app becomes active, and while it is active when that notification arrives.
 2. Each added or updated contact has its postal addresses geocoded. Deleted contacts have their locations removed.
 3. Results are written to the store, then `contactLocationAnnotations` is refreshed from it. The token is saved once the changes have been applied.
+4. If the network drops while geocoding (for example `NSURLErrorNotConnectedToInternet`), the sync stops without saving the token and `isOffline` becomes true. When connectivity returns, it starts again from the saved token. Changes are idempotent, so ones applied before the pause are applied again without duplicating locations, but their addresses are geocoded again and count towards `maxRequests`.
 
 CNContactStore's change-history enumerator can't be called from Swift, so a small Objective-C target (`ContactsChangeHistory`) wraps it.
 

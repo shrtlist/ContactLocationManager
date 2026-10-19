@@ -98,6 +98,8 @@ public final class ContactHistoryFetcher {
     /// Calls that overlap are folded together: a call made during a sync returns at once, and the
     /// running sync reads the changes again straight afterwards.
     public func fetchChanges() async {
+        // Access can be granted through another CNContactStore, which this fetcher wouldn't otherwise see.
+        authorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
         guard hasAccess else { return }
         await requestSync()
     }

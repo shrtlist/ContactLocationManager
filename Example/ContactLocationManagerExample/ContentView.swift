@@ -79,10 +79,15 @@ struct ContentView: View {
             }
             .navigationTitle("Example")
             .task(id: fetcher.authorizationStatus) {
+                guard fetcher.authorizationStatus == .authorized || fetcher.authorizationStatus == .limited else { return }
                 await model.refreshCounts()
             }
             .task {
+                await fetcher.fetchChanges()
+            }
+            .task {
                 for await _ in NotificationCenter.default.notifications(named: .CNContactStoreDidChange) {
+                    await fetcher.fetchChanges()
                     await model.refreshCounts()
                 }
             }

@@ -168,13 +168,13 @@ public final class ContactHistoryFetcher {
         guard let (token, changes) = try? await Self.fetchHistory(startingToken: savedToken), !startOver else { return }
         defer { syncProgress = nil }
         for (index, change) in changes.enumerated() {
-            syncProgress = Double(index) / Double(changes.count)
             await contactActor.apply([change])
+            syncProgress = Double(index + 1) / Double(changes.count)
             guard !startOver else { return }
         }
         // Saved after applying: if the app is killed mid-sync, the next launch reads these changes again.
         savedToken = token
-        syncProgress = nil
+
         // If the contacts couldn't be read, keep what is on the map rather than blanking it.
         if let annotations = await contactActor.fetchAll(), !startOver {
             contactLocationAnnotations = annotations

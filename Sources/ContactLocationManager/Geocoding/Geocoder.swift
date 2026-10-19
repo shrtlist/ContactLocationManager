@@ -18,6 +18,22 @@ public enum GeocodingError: Error, Sendable {
     case invalidRequest
     /// The calling task was cancelled before an answer arrived.
     case cancelled
+    /// No network connection. Every provider would fail, so don't fail over; retry once connectivity returns.
+    case offline
+}
+
+/// True for errors that mean the device has no usable connection, including when wrapped as an underlying error.
+func isOfflineError(_ error: Error) -> Bool {
+    let offlineCodes: Set<Int> = [
+        NSURLErrorNotConnectedToInternet,
+        NSURLErrorNetworkConnectionLost,
+        NSURLErrorDataNotAllowed,
+        NSURLErrorInternationalRoamingOff,
+    ]
+    let nsError = error as NSError
+    if nsError.domain == NSURLErrorDomain, offlineCodes.contains(nsError.code) { return true }
+    if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? Error { return isOfflineError(underlying) }
+    return false
 }
 
 public protocol Geocoder: Sendable {
@@ -33,7 +49,7 @@ extension URLSession {
         do {
             (data, response) = try await self.data(for: request)
         } catch {
-            throw GeocodingError.unavailable
+            throw isOfflineError(error) ? GeocodingError.offline : GeocodingError.unavailable
         }
         guard let http = response as? HTTPURLResponse else { throw GeocodingError.unavailable }
         switch http.statusCode {

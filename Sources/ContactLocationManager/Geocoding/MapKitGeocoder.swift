@@ -14,13 +14,14 @@ public struct MapKitGeocoder: Geocoder {
         do {
             return try await request.mapItems.first?.location.coordinate
         } catch let error as MKError {
+            if isOfflineError(error) { throw GeocodingError.offline }
             switch error.code {
             case .placemarkNotFound: return nil
             case .loadingThrottled: throw GeocodingError.rateLimited
             default: throw GeocodingError.unavailable
             }
         } catch {
-            throw GeocodingError.unavailable
+            throw isOfflineError(error) ? GeocodingError.offline : GeocodingError.unavailable
         }
     }
 }

@@ -66,12 +66,14 @@ actor ContactActor {
         }
     }
 
-    func apply(_ changes: [ContactHistoryChange]) async {
+    /// Throws `.offline` before touching the store for the change that couldn't be geocoded;
+    /// changes before it have been applied.
+    func apply(_ changes: [ContactHistoryChange]) async throws(GeocodingError) {
         for change in changes {
             switch change {
             case .removeAll: removeAll()
-            case .insert(let contact): await insert(contact)
-            case .update(let contact): await update(with: contact)
+            case .insert(let contact): try await insert(contact)
+            case .update(let contact): try await update(with: contact)
             case .delete(let identifier): delete(contactIdentifier: identifier)
             }
         }
@@ -82,16 +84,14 @@ actor ContactActor {
             ContactLocation.SK_removeAll(context)
         }
     }
-    
-    func insert(_ contact: CNContact) async {
-        let coordinates = await geocode(contact)
-        SkopelosClient.shared.writeSync { context in
-            Self.createLocations(for: contact, coordinates: coordinates, in: context)
-        }
+
+    /// Replaces any locations already stored for the contact, so applying a change twice is harmless.
+    func insert(_ contact: CNContact) async throws(GeocodingError) {
+        try await update(with: contact)
     }
-    
-    func update(with contact: CNContact) async {
-        let coordinates = await geocode(contact)
+
+    func update(with contact: CNContact) async throws(GeocodingError) {
+        let coordinates = try await geocode(contact)
 
         SkopelosClient.shared.writeSync { context in
             Self.delete(contactIdentifier: contact.identifier, in: context)
@@ -109,20 +109,22 @@ actor ContactActor {
     // MARK: - Private API
 
     /// Geocodes each postal address of the contact, keyed by postal address identifier.
-    /// Addresses that can't be geocoded are omitted.
-    private func geocode(_ contact: CNContact) async -> [String: CLLocationCoordinate2D] {
+    /// Addresses that can't be geocoded are omitted. Throws `.offline` so the sync can pause.
+    private func geocode(_ contact: CNContact) async throws(GeocodingError) -> [String: CLLocationCoordinate2D] {
         var coordinates: [String: CLLocationCoordinate2D] = [:]
         for address in contact.postalAddresses {
-            if let coordinate = await geocode(address.value) {
+            if let coordinate = try await geocode(address.value) {
                 coordinates[address.identifier] = coordinate
             }
         }
         return coordinates
     }
 
-    private func geocode(_ address: CNPostalAddress) async -> CLLocationCoordinate2D? {
-        do {
+    private func geocode(_ address: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
+        do throws(GeocodingError) {
             return try await geocoder.coordinate(for: address)
+        } catch .offline {
+            throw .offline
         } catch {
             // The address is personal data, so it stays redacted in the unified log.
             Logger.geocoding.error("Geocoding failure for \(address.mailingString, privacy: .private): \(error, privacy: .public)")

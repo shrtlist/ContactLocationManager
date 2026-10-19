@@ -8,7 +8,7 @@ import CoreLocation
 
 /// Tries each provider in order and returns the first coordinate found.
 ///
-/// Fails over on no-match and on recoverable errors, but not on `.invalidRequest`.
+/// Fails over on no-match and on recoverable errors, but not on `.invalidRequest` or `.offline`.
 /// A provider that reports `.rateLimited` is skipped for `cooldown`, measured on `clock`.
 /// Stops without trying further providers once the calling task is cancelled.
 public actor FailoverGeocoder<C: Clock>: Geocoder where C.Duration == Duration {
@@ -33,6 +33,8 @@ public actor FailoverGeocoder<C: Clock>: Geocoder where C.Duration == Duration {
                 }
             } catch .invalidRequest {
                 throw .invalidRequest
+            } catch .offline {
+                throw .offline
             } catch {
                 // Providers report a cancelled request as an ordinary failure, so ask the task
                 // itself. Otherwise a torn-down sync would carry on to the next, possibly billed, provider.

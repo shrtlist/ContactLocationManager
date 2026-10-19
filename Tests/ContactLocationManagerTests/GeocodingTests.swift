@@ -47,6 +47,23 @@ private let address = CNPostalAddress()
         #expect(second.calls == 0)
     }
 
+    @Test func offlineDoesNotFailOver() async {
+        let first = StubGeocoder(.failure(.offline)), second = StubGeocoder(.coordinate(2))
+        await #expect(throws: GeocodingError.offline) {
+            try await FailoverGeocoder(providers: [first, second]).coordinate(for: address)
+        }
+        #expect(second.calls == 0)
+    }
+
+    @Test func recognizesOfflineURLErrors() {
+        #expect(isOfflineError(URLError(.notConnectedToInternet)))
+        #expect(isOfflineError(URLError(.networkConnectionLost)))
+        #expect(!isOfflineError(URLError(.timedOut)))
+        let wrapped = NSError(domain: MKErrorDomain, code: 4,
+                              userInfo: [NSUnderlyingErrorKey: URLError(.notConnectedToInternet)])
+        #expect(isOfflineError(wrapped))
+    }
+
     @Test func allNoMatchReturnsNil() async throws {
         let result = try await FailoverGeocoder(providers: [StubGeocoder(.noMatch), StubGeocoder(.noMatch)])
             .coordinate(for: address)

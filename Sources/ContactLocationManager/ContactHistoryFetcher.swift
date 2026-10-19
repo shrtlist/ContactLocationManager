@@ -12,6 +12,7 @@
 @preconcurrency import Contacts
 import ContactsChangeHistory
 import CoreLocation
+import Network
 import Observation
 
 @MainActor
@@ -28,6 +29,11 @@ public final class ContactHistoryFetcher {
     /// Cleared by `setMaxRequests(_:)` once the limit is raised.
     public private(set) var isRateLimited = false
 
+    /// True while a sync is paused because the network is down. It resumes by itself when
+    /// connectivity returns.
+    public private(set) var isOffline = false
+
+    @ObservationIgnored private var pathMonitor: NWPathMonitor?
     @ObservationIgnored private let savedTokenUserDefaultsKey = "CNContactHistoryChangeHistoryToken"
     @ObservationIgnored private let contactActor: ContactActor
     @ObservationIgnored private let limiter: RequestLimitedGeocoder
@@ -95,6 +101,8 @@ public final class ContactHistoryFetcher {
     ///
     /// The fetcher doesn't watch for `CNContactStoreDidChange` itself, so the host decides when to
     /// sync, for example when the app becomes active or while it listens for that notification.
+    /// If the network goes down mid-sync, the sync pauses (`isOffline`) and starts again from the
+    /// saved history token when connectivity returns.
     /// Calls that overlap are folded together: a call made during a sync returns at once, and the
     /// running sync reads the changes again straight afterwards.
     public func fetchChanges() async {
@@ -158,6 +166,8 @@ public final class ContactHistoryFetcher {
             if startOver {
                 startOver = false
                 savedToken = nil
+                stopMonitoringConnectivity()
+                isOffline = false
                 await contactActor.removeAll()
                 contactLocationAnnotations = []
                 continue
@@ -172,11 +182,19 @@ public final class ContactHistoryFetcher {
         // At first launch, the token will be nil and all contacts will be retrieved as additions
         guard let (token, changes) = try? await Self.fetchHistory(startingToken: savedToken), !startOver else { return }
         defer { syncProgress = nil }
+        // Changes are idempotent, so after a pause the same history is simply applied again.
         for (index, change) in changes.enumerated() {
-            await contactActor.apply([change])
+            do {
+                try await contactActor.apply([change])
+            } catch {
+                isOffline = true
+                startMonitoringConnectivity()
+                return
+            }
             syncProgress = Double(index + 1) / Double(changes.count)
             guard !startOver else { return }
         }
+        isOffline = false
         // Saved after applying: if the app is killed mid-sync, the next launch reads these changes again.
         savedToken = token
 
@@ -185,6 +203,28 @@ public final class ContactHistoryFetcher {
             contactLocationAnnotations = annotations
         }
         isRateLimited = await limiter.didRefuse
+    }
+
+    /// Watches the network while paused. Resumes the sync as soon as a route is available.
+    private func startMonitoringConnectivity() {
+        guard pathMonitor == nil else { return }
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            guard path.status == .satisfied else { return }
+            Task { @MainActor in
+                guard let self, self.pathMonitor === monitor else { return }
+                self.stopMonitoringConnectivity()
+                self.isOffline = false
+                await self.requestSync()
+            }
+        }
+        pathMonitor = monitor
+        monitor.start(queue: DispatchQueue(label: "ContactHistoryFetcher.path"))
+    }
+
+    private func stopMonitoringConnectivity() {
+        pathMonitor?.cancel()
+        pathMonitor = nil
     }
 
     @concurrent

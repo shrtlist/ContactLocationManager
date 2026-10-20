@@ -143,6 +143,27 @@ private final class ManualClock: Clock, Sendable {
     }
 }
 
+@Suite struct GoogleRequestTests {
+    private let address: CNPostalAddress = {
+        let a = CNMutablePostalAddress()
+        a.street = "1 Infinite Loop"
+        a.city = "Cupertino"
+        return a
+    }()
+
+    @Test func sendsBundleIdentifierHeader() {
+        let geocoder = GoogleGeocoder(apiKey: "k", bundleIdentifier: "com.example.app")
+        let request = geocoder.makeRequest(for: address)
+        #expect(request.value(forHTTPHeaderField: "X-Ios-Bundle-Identifier") == "com.example.app")
+        #expect(request.url?.absoluteString.contains("key=k") == true)
+    }
+
+    @Test func omitsHeaderWithoutBundleIdentifier() {
+        let geocoder = GoogleGeocoder(apiKey: "k", bundleIdentifier: nil)
+        #expect(geocoder.makeRequest(for: address).value(forHTTPHeaderField: "X-Ios-Bundle-Identifier") == nil)
+    }
+}
+
 private struct CancelledSecondProviderGeocoder: Geocoder {
     func coordinate(for address: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
         // Like URLSession and MapKit, report cancellation as an ordinary failure.

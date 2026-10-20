@@ -10,10 +10,14 @@ import CoreLocation
 public struct GoogleGeocoder: Geocoder {
     let apiKey: String
     let session: URLSession
+    let bundleIdentifier: String?
 
-    public init(apiKey: String, session: URLSession = .shared) {
+    /// - Parameter bundleIdentifier: Sent as `X-Ios-Bundle-Identifier` so a key restricted to iOS apps in the
+    ///   Google Cloud console is accepted. Defaults to the host app's bundle identifier.
+    public init(apiKey: String, session: URLSession = .shared, bundleIdentifier: String? = Bundle.main.bundleIdentifier) {
         self.apiKey = apiKey
         self.session = session
+        self.bundleIdentifier = bundleIdentifier
     }
 
     private struct Response: Decodable {
@@ -29,13 +33,22 @@ public struct GoogleGeocoder: Geocoder {
     }
 
     public func coordinate(for address: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
+        let data = try await session.geocodingData(for: makeRequest(for: address))
+        return try Self.parse(data)
+    }
+
+    func makeRequest(for address: CNPostalAddress) -> URLRequest {
         let endpoint = URL(string: "https://maps.googleapis.com/maps/api/geocode/json")!
         let url = endpoint.appending(queryItems: [
             URLQueryItem(name: "address", value: address.mailingString),
             URLQueryItem(name: "key", value: apiKey),
         ])
-        let data = try await session.geocodingData(for: URLRequest(url: url))
-        return try Self.parse(data)
+        var request = URLRequest(url: url)
+        // Without this header Google rejects requests made with an iOS-app-restricted key (REQUEST_DENIED).
+        if let bundleIdentifier {
+            request.setValue(bundleIdentifier, forHTTPHeaderField: "X-Ios-Bundle-Identifier")
+        }
+        return request
     }
 
     /// Google reports failures inside an HTTP 200 body, so the `status` field decides the outcome.

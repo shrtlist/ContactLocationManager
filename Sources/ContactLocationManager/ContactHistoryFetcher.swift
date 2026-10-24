@@ -40,6 +40,8 @@ public final class ContactHistoryFetcher {
     @ObservationIgnored private var isFetching = false
     @ObservationIgnored private var needsAnotherFetch = false
     @ObservationIgnored private var startOver = false
+    /// Whether `contactLocationAnnotations` holds what's stored, so a sync that changed nothing can skip republishing it.
+    @ObservationIgnored private var hasPublished = false
 
     @ObservationIgnored private var savedToken: Data? {
         get {
@@ -174,6 +176,7 @@ public final class ContactHistoryFetcher {
                 isOffline = false
                 await contactActor.removeAll()
                 contactLocationAnnotations = []
+                hasPublished = false
                 continue
             }
             needsAnotherFetch = false
@@ -202,9 +205,15 @@ public final class ContactHistoryFetcher {
         // Saved after applying: if the app is killed mid-sync, the next launch reads these changes again.
         savedToken = token
 
+        // With no changes, what's stored is what was last published. Publishing an equal list again would
+        // still notify observers, and the host's catch-up fetch right after the launch sync made the map
+        // redraw every pin for nothing.
+        let isUnchanged = changes.isEmpty && hasPublished
+
         // If the contacts couldn't be read, keep what is on the map rather than blanking it.
-        if let annotations = await contactActor.fetchAll(), !startOver {
+        if !isUnchanged, let annotations = await contactActor.fetchAll(), !startOver {
             contactLocationAnnotations = annotations
+            hasPublished = true
         }
         isRateLimited = await limiter.didRefuse
     }

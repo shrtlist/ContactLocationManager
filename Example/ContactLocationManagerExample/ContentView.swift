@@ -32,14 +32,20 @@ struct ContentView: View {
                 Section {
                     Toggle("Mock geocoder", isOn: $model.usesMockGeocoder)
                         .disabled(isSyncing)
-                    LabeledContent("MapKit", value: model.usesMockGeocoder ? "Off" : "Always first")
+                    // Shown on when it's the only provider left, whatever the saved setting.
+                    Toggle("MapKit", isOn: Binding(get: { model.includesMapKit && !model.usesMockGeocoder },
+                                                   set: { model.usesMapKit = $0 }))
+                        .disabled(!model.hasProviderBesidesMapKit || model.usesMockGeocoder || isSyncing)
                     // Shown off when there's no key or the mock is on, whatever the saved setting.
                     Toggle("Mapsi", isOn: Binding(get: { model.usesMapsi && model.mapsiAPIKey != nil && !model.usesMockGeocoder },
                                                   set: { model.usesMapsi = $0 }))
-                        .disabled(model.mapsiAPIKey == nil || model.usesMockGeocoder || isSyncing)
+                        // With MapKit off, the last provider on can't be switched off.
+                        .disabled(model.mapsiAPIKey == nil || model.usesMockGeocoder || isSyncing
+                                  || (model.isMapsiOn && !model.usesMapKit && !model.isGoogleOn))
                     Toggle("Google", isOn: Binding(get: { model.usesGoogle && model.googleAPIKey != nil && !model.usesMockGeocoder },
                                                    set: { model.usesGoogle = $0 }))
-                        .disabled(model.googleAPIKey == nil || model.usesMockGeocoder || isSyncing)
+                        .disabled(model.googleAPIKey == nil || model.usesMockGeocoder || isSyncing
+                                  || (model.isGoogleOn && !model.usesMapKit && !model.isMapsiOn))
                     Toggle("Limit requests", isOn: $model.limitsRequests)
                     if model.limitsRequests {
                         Stepper("Max requests: \(model.maxRequests)", value: $model.maxRequests, in: 0...10_000)
@@ -51,7 +57,7 @@ struct ContentView: View {
                 } header: {
                     Text("Geocoding")
                 } footer: {
-                    Text("The mock geocoder returns a random coordinate for each address, without the network. Mapsi and Google need keys in Keys.plist. Geocoders can't be switched during a sync, and only affect addresses geocoded from then on; reset to geocode everything again.")
+                    Text("The mock geocoder returns a random coordinate for each address, without the network. Mapsi and Google need keys in Keys.plist. MapKit can be turned off while another provider is on. Geocoders can't be switched during a sync, and only affect addresses geocoded from then on; reset to geocode everything again.")
                 }
 
                 Section("Sync") {

@@ -53,21 +53,25 @@ public final class ContactHistoryFetcher {
     /// Starts loading contacts right away if access has already been granted. Otherwise the host
     /// calls `requestAccess()` when it's ready to show the system prompt.
     /// After that first load, contacts are only read again when the host calls `fetchChanges()`.
-    /// Geocoding tries MapKit first, then Mapsi, then Google. A provider without a key is left out.
+    /// Geocoding tries MapKit first, then Mapsi, then Google. A provider without a key is left out,
+    /// and MapKit is left out when `includesMapKit` is false, for example to test another provider alone.
     /// `maxRequests` is the total number of addresses that will ever be geocoded, or `nil` for no
     /// limit. Contacts beyond it are skipped and `isRateLimited` becomes true.
     /// `contactKeys` are the contact properties each annotation's `contact` has loaded, on top of
     /// the postal addresses, which are always loaded. The default is the name, thumbnail and type.
     public convenience init(mapsiAPIKey: String? = nil,
                             googleAPIKey: String? = nil,
+                            includesMapKit: Bool = true,
                             maxRequests: Int? = nil,
                             contactKeys: [any CNKeyDescriptor] = ContactHistoryFetcher.defaultContactKeys) {
-        self.init(geocoder: GeocoderFactory.makeDefault(mapsiAPIKey: mapsiAPIKey, googleAPIKey: googleAPIKey),
+        self.init(geocoder: GeocoderFactory.makeDefault(mapsiAPIKey: mapsiAPIKey,
+                                                        googleAPIKey: googleAPIKey,
+                                                        includesMapKit: includesMapKit),
                   maxRequests: maxRequests,
                   contactKeys: contactKeys)
     }
 
-    /// Like `init(mapsiAPIKey:googleAPIKey:maxRequests:contactKeys:)`, but geocodes with the given
+    /// Like `init(mapsiAPIKey:googleAPIKey:includesMapKit:maxRequests:contactKeys:)`, but geocodes with the given
     /// geocoder instead of the MapKit, Mapsi and Google chain, for example a mock for testing.
     public init(geocoder: any Geocoder,
                 maxRequests: Int? = nil,

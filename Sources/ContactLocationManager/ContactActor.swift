@@ -95,7 +95,6 @@ actor ContactActor {
 
         SkopelosClient.shared.writeSync { context in
             Self.delete(contactIdentifier: contact.identifier, in: context)
-        }.writeSync { context in
             Self.createLocations(for: contact, coordinates: coordinates, in: context)
         }
     }

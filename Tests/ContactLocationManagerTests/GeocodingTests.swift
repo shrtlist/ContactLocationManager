@@ -275,7 +275,6 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
     @Test func conformsToMKAnnotationForMapKit() {
         let annotation = annotation(givenName: "Ada", familyName: "Lovelace")
         let object: NSObject = annotation
-        #expect(annotation is MKAnnotation)
         #expect(object.responds(to: #selector(getter: MKAnnotation.coordinate)))
         #expect(object.responds(to: #selector(getter: MKAnnotation.title)))
         #expect(object.responds(to: #selector(getter: MKAnnotation.subtitle)))

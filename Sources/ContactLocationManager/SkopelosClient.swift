@@ -12,7 +12,7 @@ import Skopelos
 
 extension Skopelos {
     /// Bridges a synchronous `read` onto async/await.
-    func readAsync<T>(_ block: @escaping (NSManagedObjectContext) -> T) async -> T {
+    func read<T>(_ block: @escaping (NSManagedObjectContext) -> T) async -> T {
         await withCheckedContinuation { continuation in
             read { context in
                 continuation.resume(returning: block(context))

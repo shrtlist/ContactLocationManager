@@ -40,7 +40,7 @@ actor ContactActor {
     /// Builds an annotation for every stored location, looking up the contacts in one request.
     /// Returns nil if that request fails.
     func fetchAll() async -> [ContactLocationAnnotation]? {
-        let contactLocations = await SkopelosClient.shared.readAsync { context in
+        let contactLocations = await SkopelosClient.shared.read { context in
             ContactLocation.SK_all(context)
         }
 

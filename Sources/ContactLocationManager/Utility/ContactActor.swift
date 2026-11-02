@@ -37,32 +37,29 @@ actor ContactActor {
         self.contactKeys = contactKeys
     }
 
-    /// Builds an annotation for every stored location, looking up the contacts in one request.
-    /// Returns nil if that request fails.
-    func fetchAll() async -> [ContactLocationAnnotation]? {
-        let contactLocations = await SkopelosClient.shared.read { context in
-            ContactLocation.SK_all(context)
+    /// Builds an annotation for every ContactLocation, looking up only their contacts in one request.
+    func fetchAll() async throws -> [ContactLocationAnnotation] {
+        let contactLocationSnapshots = await SkopelosClient.shared.read { context in
+            ContactLocation.SK_all(context).map {
+                ContactLocationSnapshot(contactId: $0.contactId, latitude: $0.latitude, longitude: $0.longitude, postalAddressId: $0.postalAddressId, )
+            }
         }
 
-        guard !contactLocations.isEmpty else { return [] }
+        guard !contactLocationSnapshots.isEmpty else { return [] }
 
         let fetchRequest = CNContactFetchRequest(keysToFetch: contactKeys.descriptors)
+        fetchRequest.predicate = CNContact.predicateForContacts(withIdentifiers: contactLocationSnapshots.map(\.contactId))
 
-        var contacts = [CNContact]()
+        var contactsById = [String: CNContact]()
 
-        do {
-            try CNContactStore().enumerateContacts(with: fetchRequest) { (contact, stopPointer) in
-                contacts.append(contact)
-            }
-        } catch {
-            Logger.contacts.error("Contact fetch failed: \(error, privacy: .public)")
-            return nil
+        try CNContactStore().enumerateContacts(with: fetchRequest) { (contact, stopPointer) in
+            contactsById[contact.identifier] = contact
         }
 
-        return contactLocations.compactMap { contactLocation in
-            guard let contact = contacts.first(where: { $0.identifier == contactLocation.contactId }),
-                  let labeledAddress = contact.postalAddresses.first(where: { $0.identifier == contactLocation.postalAddressId }) else { return nil }
-            return ContactLocationAnnotation(contact: contact, labeledAddress: labeledAddress, latitude: contactLocation.latitude, longitude: contactLocation.longitude)
+        return contactLocationSnapshots.compactMap { contactLocationSnapshot in
+            guard let contact = contactsById[contactLocationSnapshot.contactId],
+                  let labeledAddress = contact.postalAddresses.first(where: { $0.identifier == contactLocationSnapshot.postalAddressId }) else { return nil }
+            return ContactLocationAnnotation(contact: contact, labeledAddress: labeledAddress, latitude: contactLocationSnapshot.latitude, longitude: contactLocationSnapshot.longitude)
         }
     }
 

@@ -14,6 +14,7 @@ import ContactsChangeHistory
 import CoreLocation
 import Network
 import Observation
+import OSLog
 
 @MainActor
 @Observable
@@ -213,9 +214,13 @@ public final class ContactHistoryFetcher {
         isRateLimited = await limiter.didRefuse
     }
 
+    /// If the contacts can't be read, keeps what is on the map rather than blanking it.
     private func publishStoredAnnotations() async {
-        guard let annotations = await contactActor.fetchAll() else { return }
-        contactLocationAnnotations = annotations
+        do {
+            contactLocationAnnotations = try await contactActor.fetchAll()
+        } catch {
+            Logger.contacts.error("Contact fetch failed: \(error, privacy: .public)")
+        }
     }
 
     /// Watches the network while paused. Resumes the sync as soon as a route is available.

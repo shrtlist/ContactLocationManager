@@ -11,8 +11,9 @@ import OSLog
 import Skopelos
 
 extension Skopelos {
-    /// Bridges a synchronous `read` onto async/await.
-    func read<T>(_ block: @escaping (NSManagedObjectContext) -> T) async -> T {
+    /// Bridges a synchronous `read` onto async/await. The result must be `Sendable`, so managed
+    /// objects can't leave the context's queue; copy out the values you need instead.
+    func read<T: Sendable>(_ block: @escaping (NSManagedObjectContext) -> T) async -> T {
         await withCheckedContinuation { continuation in
             read { context in
                 continuation.resume(returning: block(context))
@@ -31,6 +32,7 @@ final class SkopelosClient: Skopelos, @unchecked Sendable {
     }()
 
     static let shared = SkopelosClient(sqliteStack: modelURL, allowsConcurrentWritings: false)
+
     override func handleError(_ error: NSError) {
         // clients should do the right thing here
         Logger.persistence.error("Skopelos error: \(error.localizedDescription, privacy: .public)")

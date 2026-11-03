@@ -24,10 +24,10 @@ public struct MapsiGeocoder: Geocoder {
         let results: [Result]
     }
 
-    public func coordinate(for address: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
+    public func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
         let endpoint = URL(string: "https://mapsi.dev/v1/geocode")!
         let url = endpoint.appending(queryItems: [
-            URLQueryItem(name: "q", value: address.mailingString),
+            URLQueryItem(name: "q", value: postalAddress.mailingString),
             URLQueryItem(name: "limit", value: "1"),
         ])
         var request = URLRequest(url: url)

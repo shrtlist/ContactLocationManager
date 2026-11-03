@@ -192,11 +192,11 @@ public final class ContactHistoryFetcher {
         // Changes are idempotent, so after a pause the same history is simply applied again.
         for (index, change) in changes.enumerated() {
             do {
-                try await contactActor.apply([change])
+                try await contactActor.apply(change)
             } catch {
                 isOffline = true
                 startMonitoringConnectivity()
-                await publishStoredAnnotations()
+                await loadContactLocationAnnotations()
                 return
             }
             syncProgress = Double(index + 1) / Double(changes.count)
@@ -209,13 +209,13 @@ public final class ContactHistoryFetcher {
 
         // When nothing has been published yet, the stored list is published.
         if !changes.isEmpty || contactLocationAnnotations.isEmpty {
-            await publishStoredAnnotations()
+            await loadContactLocationAnnotations()
         }
         isRateLimited = await limiter.didRefuse
     }
 
     /// If the contacts can't be read, keeps what is on the map rather than blanking it.
-    private func publishStoredAnnotations() async {
+    private func loadContactLocationAnnotations() async {
         do {
             contactLocationAnnotations = try await contactActor.fetchAll()
         } catch {

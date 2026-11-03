@@ -23,12 +23,12 @@ public actor FailoverGeocoder<C: Clock>: Geocoder where C.Duration == Duration {
         self.clock = clock
     }
 
-    public func coordinate(for address: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
+    public func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
         var lastError: GeocodingError?
         for (index, provider) in providers.enumerated() {
             if let until = cooldownUntil[index], until > clock.now { continue }
             do throws(GeocodingError) {
-                if let coordinate = try await provider.coordinate(for: address) {
+                if let coordinate = try await provider.coordinate(for: postalAddress) {
                     return coordinate
                 }
             } catch .invalidRequest {

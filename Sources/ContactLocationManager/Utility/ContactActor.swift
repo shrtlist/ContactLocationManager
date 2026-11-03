@@ -63,16 +63,13 @@ actor ContactActor {
         }
     }
 
-    /// Throws `.offline` before touching the store for the change that couldn't be geocoded;
-    /// changes before it have been applied.
-    func apply(_ changes: [ContactHistoryChange]) async throws(GeocodingError) {
-        for change in changes {
-            switch change {
-            case .removeAll: removeAll()
-            case .insert(let contact): try await insert(contact)
-            case .update(let contact): try await update(with: contact)
-            case .delete(let identifier): delete(contactIdentifier: identifier)
-            }
+    /// Throws .offline before touching the store if the change couldn't be geocoded.
+    func apply(_ change: ContactHistoryChange) async throws(GeocodingError) {
+        switch change {
+        case .removeAll: removeAll()
+        case .insert(let contact): try await insert(contact)
+        case .update(let contact): try await update(with: contact)
+        case .delete(let identifier): delete(contactIdentifier: identifier)
         }
     }
 

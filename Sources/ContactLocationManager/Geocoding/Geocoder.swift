@@ -38,7 +38,7 @@ func isOfflineError(_ error: Error) -> Bool {
 
 public protocol Geocoder: Sendable {
     /// Returns nil when the address has no match. Throws `GeocodingError` on service failure.
-    func coordinate(for address: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D?
+    @concurrent func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D?
 }
 
 extension URLSession {

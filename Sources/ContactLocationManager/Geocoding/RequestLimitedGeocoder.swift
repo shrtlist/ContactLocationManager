@@ -31,7 +31,7 @@ actor RequestLimitedGeocoder: Geocoder {
         set { defaults.set(newValue, forKey: countKey) }
     }
 
-    func coordinate(for address: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
+    func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
         if let maxRequests, count >= maxRequests {
             defaults.set(true, forKey: refusedKey)
             throw .rateLimited
@@ -40,7 +40,7 @@ actor RequestLimitedGeocoder: Geocoder {
         // Reserve before awaiting so overlapping requests can't overshoot the limit.
         count += 1
         do throws(GeocodingError) {
-            return try await base.coordinate(for: address)
+            return try await base.coordinate(for: postalAddress)
         } catch {
             // A request that failed to get an answer doesn't count.
             count -= 1

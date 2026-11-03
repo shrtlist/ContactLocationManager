@@ -13,7 +13,7 @@ private final class StubGeocoder: Geocoder {
 
     init(_ outcome: Outcome) { self.outcome = outcome }
 
-    func coordinate(for address: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
+    func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
         callCount.withLock { $0 += 1 }
         switch outcome {
         case .coordinate(let value): return CLLocationCoordinate2D(latitude: value, longitude: value)

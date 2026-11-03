@@ -32,8 +32,8 @@ public struct GoogleGeocoder: Geocoder {
         let results: [Result]?
     }
 
-    public func coordinate(for address: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
-        let data = try await session.geocodingData(for: makeRequest(for: address))
+    public func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
+        let data = try await session.geocodingData(for: makeRequest(for: postalAddress))
         return try Self.parse(data)
     }
 

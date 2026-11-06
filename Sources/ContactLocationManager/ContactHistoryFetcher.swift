@@ -35,21 +35,11 @@ public final class ContactHistoryFetcher {
     public private(set) var isOffline = false
 
     @ObservationIgnored private var pathMonitor: NWPathMonitor?
-    @ObservationIgnored private let savedTokenUserDefaultsKey = "CNContactHistoryChangeHistoryToken"
     @ObservationIgnored private let contactActor: ContactActor
     @ObservationIgnored private let limiter: RequestLimitedGeocoder
     @ObservationIgnored private var isFetching = false
     @ObservationIgnored private var needsAnotherFetch = false
     @ObservationIgnored private var startOver = false
-
-    @ObservationIgnored private var savedToken: Data? {
-        get {
-            UserDefaults.standard.data(forKey: savedTokenUserDefaultsKey)
-        }
-        set {
-            UserDefaults.standard.set(newValue, forKey: savedTokenUserDefaultsKey)
-        }
-    }
 
     /// Starts loading contacts right away if access has already been granted. Otherwise the host
     /// calls `requestAccess()` when it's ready to show the system prompt.
@@ -170,7 +160,7 @@ public final class ContactHistoryFetcher {
         while startOver || needsAnotherFetch {
             if startOver {
                 startOver = false
-                savedToken = nil
+                await contactActor.saveToken(nil)
                 stopMonitoringConnectivity()
                 isOffline = false
                 await contactActor.removeAll()
@@ -185,7 +175,7 @@ public final class ContactHistoryFetcher {
     /// Stops after the current contact once a clear has been asked for, so no more geocoding
     /// requests are spent on work the clear will throw away.
     private func fetchChangesOnce() async {
-        guard let (token, changes) = try? await Self.fetchHistory(startingToken: savedToken) else { return }
+        guard let (token, changes) = try? await Self.fetchHistory(startingToken: await contactActor.savedToken()) else { return }
 
         defer { syncProgress = nil }
 
@@ -205,7 +195,7 @@ public final class ContactHistoryFetcher {
 
         isOffline = false
         // Saved after applying: if the app is killed mid-sync, the next launch reads these changes again.
-        savedToken = token
+        await contactActor.saveToken(token)
 
         // When nothing has been published yet, the stored list is published.
         if !changes.isEmpty || contactLocationAnnotations.isEmpty {

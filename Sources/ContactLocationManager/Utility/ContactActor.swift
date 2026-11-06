@@ -98,6 +98,19 @@ actor ContactActor {
             Self.delete(contactIdentifier: contactIdentifier, in: context)
         }
     }
+
+    func savedToken() async -> Data? {
+        await SkopelosClient.shared.read { context in
+            SyncToken.SK_all(context).first?.data
+        }
+    }
+
+    func saveToken(_ token: Data?) {
+        SkopelosClient.shared.writeSync { context in
+            SyncToken.SK_removeAll(context)
+            if let token { SyncToken.SK_create(context).data = token }
+        }
+    }
     
     // MARK: - Private API
 

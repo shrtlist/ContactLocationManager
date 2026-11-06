@@ -12,4 +12,7 @@
             </uniquenessConstraint>
         </uniquenessConstraints>
     </entity>
+    <entity name="SyncToken" representedClassName="SyncToken" syncable="YES">
+        <attribute name="data" attributeType="Binary" syncable="YES"/>
+    </entity>
 </model>

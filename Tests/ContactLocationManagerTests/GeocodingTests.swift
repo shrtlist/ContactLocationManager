@@ -90,6 +90,25 @@ private let address = CNPostalAddress()
         _ = try await geocoder.coordinate(for: address)
         #expect(limited.calls == 2)
     }
+
+    @Test func waitsOutTheCooldownWhenEveryProviderIsCoolingDown() async throws {
+        let limited = StubGeocoder(.failure(.rateLimited))
+        let geocoder = FailoverGeocoder(providers: [limited], cooldown: .seconds(60), clock: ManualClock())
+
+        await #expect(throws: GeocodingError.rateLimited) { try await geocoder.coordinate(for: address) }
+        // Cooling down now. It waits, asks again and gets the provider's answer, not "no match".
+        await #expect(throws: GeocodingError.rateLimited) { try await geocoder.coordinate(for: address) }
+        #expect(limited.calls == 2)
+    }
+
+    @Test func cancelledWhileEveryProviderIsCoolingDown() async {
+        let geocoder = FailoverGeocoder(providers: [StubGeocoder(.failure(.rateLimited))], cooldown: .seconds(60))
+        _ = try? await geocoder.coordinate(for: address)
+        let task = Task { try await geocoder.coordinate(for: address) }
+        try? await Task.sleep(for: .milliseconds(100))
+        task.cancel()
+        await #expect(throws: GeocodingError.cancelled) { try await task.value }
+    }
 }
 
 private struct ManualInstant: InstantProtocol {
@@ -109,7 +128,11 @@ private final class ManualClock: Clock, Sendable {
 
     func advance(by duration: Duration) { elapsed.withLock { $0 += duration } }
 
-    func sleep(until deadline: ManualInstant, tolerance: Duration?) async throws {}
+    /// Time only passes when someone sleeps, so a waiting geocoder wakes at its deadline.
+    func sleep(until deadline: ManualInstant, tolerance: Duration?) async throws {
+        try Task.checkCancellation()
+        elapsed.withLock { $0 = max($0, deadline.offset) }
+    }
 }
 
 @Suite struct ResponseParsingTests {

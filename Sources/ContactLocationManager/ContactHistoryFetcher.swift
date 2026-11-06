@@ -34,7 +34,6 @@ public final class ContactHistoryFetcher {
     /// connectivity returns.
     public private(set) var isOffline = false
 
-    @ObservationIgnored private var pathMonitor: NWPathMonitor?
     @ObservationIgnored private let contactActor: ContactActor
     @ObservationIgnored private let limiter: RequestLimitedGeocoder
     @ObservationIgnored private var isFetching = false
@@ -161,7 +160,6 @@ public final class ContactHistoryFetcher {
             if startOver {
                 startOver = false
                 await contactActor.saveToken(nil)
-                stopMonitoringConnectivity()
                 isOffline = false
                 await contactActor.removeAll()
                 contactLocationAnnotations = []
@@ -185,7 +183,6 @@ public final class ContactHistoryFetcher {
                 try await contactActor.apply(change)
             } catch {
                 isOffline = true
-                startMonitoringConnectivity()
                 await loadContactLocationAnnotations()
                 return
             }
@@ -211,28 +208,6 @@ public final class ContactHistoryFetcher {
         } catch {
             Logger.contacts.error("Contact fetch failed: \(error, privacy: .public)")
         }
-    }
-
-    /// Watches the network while paused. Resumes the sync as soon as a route is available.
-    private func startMonitoringConnectivity() {
-        guard pathMonitor == nil else { return }
-        let monitor = NWPathMonitor()
-        monitor.pathUpdateHandler = { [weak self] path in
-            guard path.status == .satisfied else { return }
-            Task { @MainActor in
-                guard let self, self.pathMonitor === monitor else { return }
-                self.stopMonitoringConnectivity()
-                self.isOffline = false
-                await self.requestSync()
-            }
-        }
-        pathMonitor = monitor
-        monitor.start(queue: DispatchQueue(label: "ContactHistoryFetcher.path"))
-    }
-
-    private func stopMonitoringConnectivity() {
-        pathMonitor?.cancel()
-        pathMonitor = nil
     }
 
     @concurrent

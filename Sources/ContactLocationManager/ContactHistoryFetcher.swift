@@ -173,7 +173,20 @@ public final class ContactHistoryFetcher {
     /// Stops after the current contact once a clear has been asked for, so no more geocoding
     /// requests are spent on work the clear will throw away.
     private func fetchChangesOnce() async {
-        guard let (token, changes) = try? await Self.fetchHistory(startingToken: await contactActor.savedToken()) else { return }
+        let startingToken = await contactActor.savedToken()
+        let token: Data?
+        let changes: [ContactHistoryChange]
+
+        do {
+            (token, changes) = try await Self.fetchHistory(startingToken: startingToken)
+        } catch {
+            let code = (error as? CNError)?.code
+
+            if startingToken != nil, code == .changeHistoryExpired || code == .changeHistoryInvalidAnchor {
+                startOver = true
+            }
+            return
+        }
 
         defer { syncProgress = nil }
 
@@ -191,7 +204,7 @@ public final class ContactHistoryFetcher {
         }
 
         isOffline = false
-        // Saved after applying: if the app is killed mid-sync, the next launch reads these changes again.
+
         await contactActor.saveToken(token)
 
         // When nothing has been published yet, the stored list is published.

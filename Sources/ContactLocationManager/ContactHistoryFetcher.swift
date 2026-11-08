@@ -44,9 +44,10 @@ public final class ContactHistoryFetcher {
     @ObservationIgnored private var needsAnotherFetch = false
     @ObservationIgnored private var startOver = false
 
-    /// Starts loading contacts right away if access has already been granted. Otherwise the host
-    /// calls `requestAccess()` when it's ready to show the system prompt.
-    /// After that first load, contacts are only read again when the host calls `fetchChanges()`.
+    /// Doesn't sync by itself: the host calls `fetchChanges()` when it's ready, for example once it knows
+    /// the request limit. If access has already been granted, the locations stored by earlier syncs are
+    /// published right away. Otherwise the host calls `requestAccess()` when it's ready to show the system prompt.
+    /// Contacts are only read again when the host calls `fetchChanges()`.
     /// Geocoding tries MapKit first, then Mapsi, then Google. A provider without a key is left out,
     /// and MapKit is left out when `includesMapKit` is false, for example to test another provider alone.
     /// `maxRequests` is the total number of addresses that will ever be geocoded, or `nil` for no
@@ -74,7 +75,9 @@ public final class ContactHistoryFetcher {
         let keys = ContactKeys(contactKeys + [CNContactPostalAddressesKey as CNKeyDescriptor])
         contactActor = ContactActor(geocoder: limiter, contactKeys: keys)
         authorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
-        startIfAuthorized()
+        if hasAccess {
+            Task { await loadContactLocationAnnotations() }
+        }
     }
 
     public static var defaultContactKeys: [any CNKeyDescriptor] {
@@ -85,13 +88,12 @@ public final class ContactHistoryFetcher {
         ]
     }
 
-    /// Shows the system permission prompt if the user hasn't been asked yet, then starts loading
-    /// contacts if access was granted. Does nothing for any other status.
+    /// Shows the system permission prompt if the user hasn't been asked yet. Does nothing for any other
+    /// status. It doesn't start a sync: call `fetchChanges()` once access is granted.
     public func requestAccess() async {
         guard authorizationStatus == .notDetermined else { return }
         _ = try? await CNContactStore().requestAccess(for: .contacts)
         authorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
-        startIfAuthorized()
     }
 
     /// Asks Contacts for the changes since the last sync and applies them. Does nothing until
@@ -154,11 +156,6 @@ public final class ContactHistoryFetcher {
 
     private var hasAccess: Bool {
         authorizationStatus == .authorized || authorizationStatus == .limited
-    }
-
-    private func startIfAuthorized() {
-        guard hasAccess else { return }
-        Task { await requestSync() }
     }
 
     private func requestSync() async {

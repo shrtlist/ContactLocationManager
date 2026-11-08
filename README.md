@@ -45,7 +45,7 @@ let fetcher = ContactHistoryFetcher(mapsiAPIKey: mapsiKey, googleAPIKey: googleK
 await fetcher.requestAccess()
 ```
 
-If access has already been granted, the fetcher starts syncing as soon as it is created. Otherwise it starts once `requestAccess()` succeeds.
+The fetcher doesn't sync by itself. Call `fetchChanges()` when you're ready, for example once access is granted and your request limit is known. If access has already been granted, the locations stored by earlier syncs are published as soon as it is created.
 
 `ContactHistoryFetcher` is `@MainActor` and `@Observable`. Read these properties and react when they change:
 

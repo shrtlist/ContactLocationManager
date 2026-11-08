@@ -50,7 +50,7 @@ struct ContentView: View {
                     if model.limitsRequests {
                         Stepper("Max requests: \(model.maxRequests)", value: $model.maxRequests, in: 0...10_000)
                     }
-                    if fetcher.isRateLimited {
+                    if fetcher.hasReachedRequestLimit {
                         Text("Request limit reached")
                             .foregroundStyle(.red)
                     }

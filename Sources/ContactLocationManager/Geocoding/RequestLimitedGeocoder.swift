@@ -24,7 +24,7 @@ actor RequestLimitedGeocoder: Geocoder {
     }
 
     /// True once a request has been refused because of the limit, until the limit is raised.
-    var didRefuse: Bool { defaults.bool(forKey: refusedKey) }
+    var hasRefusedRequests: Bool { defaults.bool(forKey: refusedKey) }
 
     private var count: Int {
         get { defaults.integer(forKey: countKey) }
@@ -63,7 +63,7 @@ actor RequestLimitedGeocoder: Geocoder {
     /// meaning the refused addresses need geocoding again.
     func setMaxRequests(_ newValue: Int?) -> Bool {
         maxRequests = newValue
-        guard didRefuse, newValue.map({ count < $0 }) ?? true else { return false }
+        guard hasRefusedRequests, newValue.map({ count < $0 }) ?? true else { return false }
         defaults.set(false, forKey: refusedKey)
         return true
     }

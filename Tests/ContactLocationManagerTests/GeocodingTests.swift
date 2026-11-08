@@ -221,13 +221,13 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
         _ = try await geocoder.coordinate(for: address)
         await #expect(throws: GeocodingError.requestLimitReached) { try await geocoder.coordinate(for: address) }
         #expect(base.calls == 2)
-        #expect(await geocoder.didRefuse)
+        #expect(await geocoder.hasRefusedRequests)
     }
 
     @Test func noLimitMeansNoRefusals() async throws {
         let geocoder = RequestLimitedGeocoder(geocoder: StubGeocoder(.coordinate(1)), maxRequests: nil, defaults: makeDefaults())
         for _ in 0..<50 { _ = try await geocoder.coordinate(for: address) }
-        #expect(await !geocoder.didRefuse)
+        #expect(await !geocoder.hasRefusedRequests)
     }
 
     @Test func failedRequestsDontCount() async throws {
@@ -235,7 +235,7 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
         for _ in 0..<3 {
             await #expect(throws: GeocodingError.unavailable) { try await geocoder.coordinate(for: address) }
         }
-        #expect(await !geocoder.didRefuse)
+        #expect(await !geocoder.hasRefusedRequests)
     }
 
     @Test func raisingTheLimitAfterARefusalAsksForAResync() async throws {
@@ -245,7 +245,7 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
 
         let needsResync = await geocoder.setMaxRequests(nil)
         #expect(needsResync)
-        #expect(await !geocoder.didRefuse)
+        #expect(await !geocoder.hasRefusedRequests)
         _ = try await geocoder.coordinate(for: address)
     }
 
@@ -255,7 +255,7 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
         _ = try? await geocoder.coordinate(for: address)
 
         await geocoder.resetCount()
-        #expect(await !geocoder.didRefuse)
+        #expect(await !geocoder.hasRefusedRequests)
         _ = try await geocoder.coordinate(for: address)
     }
 

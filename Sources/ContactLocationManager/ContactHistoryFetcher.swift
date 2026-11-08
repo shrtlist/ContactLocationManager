@@ -32,7 +32,7 @@ public final class ContactHistoryFetcher {
 
     /// True when contacts were skipped because the request limit was reached.
     /// Cleared by `setMaxRequests(_:)` once the limit is raised.
-    public private(set) var isRateLimited = false
+    public private(set) var hasReachedRequestLimit = false
 
     /// True while a sync is paused because the network is down. It resumes by itself when
     /// connectivity returns.
@@ -51,7 +51,7 @@ public final class ContactHistoryFetcher {
     /// Geocoding tries MapKit first, then Mapsi, then Google. A provider without a key is left out,
     /// and MapKit is left out when `includesMapKit` is false, for example to test another provider alone.
     /// `maxRequests` is the total number of addresses that will ever be geocoded, or `nil` for no
-    /// limit. Contacts beyond it are skipped and `isRateLimited` becomes true.
+    /// limit. Contacts beyond it are skipped and `hasReachedRequestLimit` becomes true.
     /// `contactKeys` are the contact properties each annotation's `contact` has loaded, on top of
     /// the postal addresses, which are always loaded. The default is the name, thumbnail and type.
     public convenience init(mapsiAPIKey: String? = nil,
@@ -136,7 +136,7 @@ public final class ContactHistoryFetcher {
     /// starts then, which may be after this returns.
     public func reset() async {
         await limiter.resetCount()
-        isRateLimited = false
+        hasReachedRequestLimit = false
         startOver = true
         await requestSync()
     }
@@ -147,7 +147,7 @@ public final class ContactHistoryFetcher {
     /// which may be after this returns.
     public func setMaxRequests(_ maxRequests: Int?) async {
         guard await limiter.setMaxRequests(maxRequests) else { return }
-        isRateLimited = false
+        hasReachedRequestLimit = false
         startOver = true
         await requestSync()
     }
@@ -227,11 +227,11 @@ public final class ContactHistoryFetcher {
         if !changes.isEmpty || contactLocationAnnotations.isEmpty {
             await loadContactLocationAnnotations()
         }
-        let didRefuse = await limiter.didRefuse
-        if didRefuse, !isRateLimited {
+        let hasRefusedRequests = await limiter.hasRefusedRequests
+        if hasRefusedRequests, !hasReachedRequestLimit {
             Logger.geocoding.info("Request limit reached, skipping addresses until it is raised")
         }
-        isRateLimited = didRefuse
+        hasReachedRequestLimit = hasRefusedRequests
     }
 
     /// If the contacts can't be read, keeps what is on the map rather than blanking it.

@@ -54,7 +54,7 @@ The fetcher doesn't sync by itself. Call `fetchChanges()` when you're ready, for
 | `contactLocationAnnotations: [ContactLocationAnnotation]` | Every geocoded address, as an `MKAnnotation` with `contact`, `labeledAddress`, `coordinate`, `title` (the contact's name) and `subtitle` (the address). Replaced when a sync pass finishes. Use the `contactKeys:` init parameter to choose which contact fields `contact` has loaded. |
 | `authorizationStatus: CNAuthorizationStatus` | The current Contacts permission. |
 | `syncProgress: Double?` | 0...1 while contacts are being processed, `nil` when idle. Counts contacts, not addresses. |
-| `isRateLimited: Bool` | True when addresses were skipped because the request limit was reached. |
+| `hasReachedRequestLimit: Bool` | True when addresses were skipped because the request limit was reached. |
 | `isOffline: Bool` | True while a sync is paused because the network is down. It resumes by itself when connectivity returns. |
 
 ### Observing from UIKit
@@ -89,7 +89,7 @@ let fetcher = ContactHistoryFetcher(
 ```
 
 - The count is saved across launches, and only `reset()` sets it back to zero. One address is one request, even if it falls through several providers. A request that fails with an error is not counted.
-- Once the cap is reached the remaining addresses are skipped without calling any provider, and `isRateLimited` becomes true. Showing an alert or a paywall is up to your app.
+- Once the cap is reached the remaining addresses are skipped without calling any provider, and `hasReachedRequestLimit` becomes true. Showing an alert or a paywall is up to your app.
 - Call `await fetcher.setMaxRequests(nil)` (or a larger number) to change the cap, for example when the user subscribes. If addresses had been skipped and the new cap lets them through, the package clears its stored locations and sync token and geocodes everything again.
 
 ### Starting over

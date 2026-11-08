@@ -10,7 +10,8 @@ public struct MapKitGeocoder: Geocoder {
     public init() {}
 
     public func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
-        guard let request = MKGeocodingRequest(addressString: postalAddress.mailingString) else { return nil }
+        guard let request = MKGeocodingRequest(addressString: postalAddress.addressString) else { return nil }
+
         do {
             return try await request.mapItems.first?.location.coordinate
         } catch let error as MKError {

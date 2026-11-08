@@ -13,8 +13,7 @@ import ContactLocationManager
 @MainActor
 @Observable
 final class ExampleModel {
-    /// Replaced when the geocoders change, since they're fixed at creation.
-    private(set) var fetcher: ContactHistoryFetcher
+    let fetcher: ContactHistoryFetcher
 
     /// Read from Keys.plist; nil if it's missing or has no such key.
     let mapsiAPIKey: String?
@@ -22,16 +21,16 @@ final class ExampleModel {
 
     /// Random coordinates instead of real geocoding, for when there's no network.
     var usesMockGeocoder: Bool {
-        didSet { save(usesMockGeocoder, for: "usesMockGeocoder"); makeFetcher() }
+        didSet { save(usesMockGeocoder, for: "usesMockGeocoder"); updateGeocoder() }
     }
     var usesMapKit: Bool {
-        didSet { save(usesMapKit, for: "usesMapKit"); makeFetcher() }
+        didSet { save(usesMapKit, for: "usesMapKit"); updateGeocoder() }
     }
     var usesMapsi: Bool {
-        didSet { save(usesMapsi, for: "usesMapsi"); makeFetcher() }
+        didSet { save(usesMapsi, for: "usesMapsi"); updateGeocoder() }
     }
     var usesGoogle: Bool {
-        didSet { save(usesGoogle, for: "usesGoogle"); makeFetcher() }
+        didSet { save(usesGoogle, for: "usesGoogle"); updateGeocoder() }
     }
     var limitsRequests: Bool {
         didSet { save(limitsRequests, for: "limitsRequests"); applyRequestLimit() }
@@ -92,13 +91,17 @@ final class ExampleModel {
         addressCount = counts.addresses
     }
 
-    /// The old fetcher should be idle; the view only allows switching providers between syncs.
-    private func makeFetcher() {
-        fetcher = Self.makeFetcher(usesMockGeocoder: usesMockGeocoder,
-                                   includesMapKit: includesMapKit,
-                                   mapsiAPIKey: usesMapsi ? mapsiAPIKey : nil,
-                                   googleAPIKey: usesGoogle ? googleAPIKey : nil,
-                                   maxRequests: requestLimit)
+    private func updateGeocoder() {
+        let fetcher = fetcher, usesMockGeocoder = usesMockGeocoder, includesMapKit = includesMapKit
+        let mapsiAPIKey = usesMapsi ? mapsiAPIKey : nil, googleAPIKey = usesGoogle ? googleAPIKey : nil
+        Task {
+            if usesMockGeocoder {
+                await fetcher.setGeocoder(MockGeocoder())
+            } else {
+                await fetcher.setGeocoder(mapsiAPIKey: mapsiAPIKey, googleAPIKey: googleAPIKey,
+                                          includesMapKit: includesMapKit)
+            }
+        }
     }
 
     private static func hasProviderBesidesMapKit(mapsiAPIKey: String?, googleAPIKey: String?) -> Bool {

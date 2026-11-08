@@ -40,7 +40,7 @@ public struct GoogleGeocoder: Geocoder {
     func makeRequest(for address: CNPostalAddress) -> URLRequest {
         let endpoint = URL(string: "https://maps.googleapis.com/maps/api/geocode/json")!
         let url = endpoint.appending(queryItems: [
-            URLQueryItem(name: "address", value: address.mailingString),
+            URLQueryItem(name: "address", value: address.addressString),
             URLQueryItem(name: "key", value: apiKey),
         ])
         var request = URLRequest(url: url)

@@ -31,8 +31,7 @@ public final class ContactLocationAnnotation: NSObject, MKAnnotation, @unchecked
         self.latitude = latitude
         self.longitude = longitude
         title = contact.formattedName
-        subtitle = labeledAddress.value.mailingString
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        subtitle = labeledAddress.value.displayAddressString
         super.init()
     }
 }

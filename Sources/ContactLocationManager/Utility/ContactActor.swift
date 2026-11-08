@@ -128,12 +128,17 @@ actor ContactActor {
 
     private func geocode(_ address: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
         do throws(GeocodingError) {
-            return try await geocoder.coordinate(for: address)
+            let coordinate = try await geocoder.coordinate(for: address)
+            if coordinate == nil {
+                // The address is personal data, so it stays redacted in the unified log.
+                Logger.geocoding.notice("No match for \(address.addressString, privacy: .private)")
+            }
+            return coordinate
         } catch .offline {
             throw .offline
         } catch {
             // The address is personal data, so it stays redacted in the unified log.
-            Logger.geocoding.error("Geocoding failure for \(address.mailingString, privacy: .private): \(error, privacy: .public)")
+            Logger.geocoding.error("Geocoding failure for \(address.addressString, privacy: .private): \(error, privacy: .public)")
             return nil
         }
     }

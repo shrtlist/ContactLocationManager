@@ -10,15 +10,15 @@ import CoreLocation
 /// reached it throws `.rateLimited` without calling the underlying geocoder.
 /// A `nil` limit means no limit.
 actor RequestLimitedGeocoder: Geocoder {
-    private let base: any Geocoder
+    private var geocoder: any Geocoder
     private let defaults: UserDefaults
     private var maxRequests: Int?
 
     private let countKey = "CNGeocodeRequestCount"
     private let refusedKey = "CNGeocodeRequestsRefused"
 
-    init(base: any Geocoder, maxRequests: Int?, defaults: UserDefaults = .standard) {
-        self.base = base
+    init(geocoder: any Geocoder, maxRequests: Int?, defaults: UserDefaults = .standard) {
+        self.geocoder = geocoder
         self.maxRequests = maxRequests
         self.defaults = defaults
     }
@@ -40,12 +40,17 @@ actor RequestLimitedGeocoder: Geocoder {
         // Reserve before awaiting so overlapping requests can't overshoot the limit.
         count += 1
         do throws(GeocodingError) {
-            return try await base.coordinate(for: postalAddress)
+            return try await geocoder.coordinate(for: postalAddress)
         } catch {
             // A request that failed to get an answer doesn't count.
             count -= 1
             throw error
         }
+    }
+
+    /// Geocodes with another geocoder from the next request on. The count and limit carry over.
+    func setGeocoder(_ geocoder: any Geocoder) {
+        self.geocoder = geocoder
     }
 
     /// Starts counting from zero again.

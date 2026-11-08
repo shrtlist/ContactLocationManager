@@ -216,7 +216,7 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
 
     @Test func refusesOnceTheLimitIsReached() async throws {
         let base = StubGeocoder(.coordinate(1))
-        let geocoder = RequestLimitedGeocoder(base: base, maxRequests: 2, defaults: makeDefaults())
+        let geocoder = RequestLimitedGeocoder(geocoder: base, maxRequests: 2, defaults: makeDefaults())
         _ = try await geocoder.coordinate(for: address)
         _ = try await geocoder.coordinate(for: address)
         await #expect(throws: GeocodingError.rateLimited) { try await geocoder.coordinate(for: address) }
@@ -225,13 +225,13 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
     }
 
     @Test func noLimitMeansNoRefusals() async throws {
-        let geocoder = RequestLimitedGeocoder(base: StubGeocoder(.coordinate(1)), maxRequests: nil, defaults: makeDefaults())
+        let geocoder = RequestLimitedGeocoder(geocoder: StubGeocoder(.coordinate(1)), maxRequests: nil, defaults: makeDefaults())
         for _ in 0..<50 { _ = try await geocoder.coordinate(for: address) }
         #expect(await !geocoder.didRefuse)
     }
 
     @Test func failedRequestsDontCount() async throws {
-        let geocoder = RequestLimitedGeocoder(base: StubGeocoder(.failure(.unavailable)), maxRequests: 1, defaults: makeDefaults())
+        let geocoder = RequestLimitedGeocoder(geocoder: StubGeocoder(.failure(.unavailable)), maxRequests: 1, defaults: makeDefaults())
         for _ in 0..<3 {
             await #expect(throws: GeocodingError.unavailable) { try await geocoder.coordinate(for: address) }
         }
@@ -239,7 +239,7 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
     }
 
     @Test func raisingTheLimitAfterARefusalAsksForAResync() async throws {
-        let geocoder = RequestLimitedGeocoder(base: StubGeocoder(.coordinate(1)), maxRequests: 1, defaults: makeDefaults())
+        let geocoder = RequestLimitedGeocoder(geocoder: StubGeocoder(.coordinate(1)), maxRequests: 1, defaults: makeDefaults())
         _ = try await geocoder.coordinate(for: address)
         _ = try? await geocoder.coordinate(for: address)
 
@@ -250,7 +250,7 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
     }
 
     @Test func resetCountAllowsRequestsAgain() async throws {
-        let geocoder = RequestLimitedGeocoder(base: StubGeocoder(.coordinate(1)), maxRequests: 1, defaults: makeDefaults())
+        let geocoder = RequestLimitedGeocoder(geocoder: StubGeocoder(.coordinate(1)), maxRequests: 1, defaults: makeDefaults())
         _ = try await geocoder.coordinate(for: address)
         _ = try? await geocoder.coordinate(for: address)
 
@@ -260,7 +260,7 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
     }
 
     @Test func raisingTheLimitWithoutARefusalNeedsNoResync() async throws {
-        let geocoder = RequestLimitedGeocoder(base: StubGeocoder(.coordinate(1)), maxRequests: 5, defaults: makeDefaults())
+        let geocoder = RequestLimitedGeocoder(geocoder: StubGeocoder(.coordinate(1)), maxRequests: 5, defaults: makeDefaults())
         _ = try await geocoder.coordinate(for: address)
         #expect(await !geocoder.setMaxRequests(nil))
     }

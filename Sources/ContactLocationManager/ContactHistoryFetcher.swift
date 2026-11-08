@@ -16,6 +16,10 @@ import Network
 import Observation
 import OSLog
 
+/// Create one per process and keep it for the life of the app; change its geocoder with
+/// `setGeocoder` rather than making another. Every fetcher shares the same
+/// store and history token, so two fetchers syncing at once would duplicate geocoding requests and
+/// could wipe each other's locations.
 @MainActor
 @Observable
 public final class ContactHistoryFetcher {
@@ -66,7 +70,7 @@ public final class ContactHistoryFetcher {
     public init(geocoder: any Geocoder,
                 maxRequests: Int? = nil,
                 contactKeys: [any CNKeyDescriptor] = ContactHistoryFetcher.defaultContactKeys) {
-        limiter = RequestLimitedGeocoder(base: geocoder, maxRequests: maxRequests)
+        limiter = RequestLimitedGeocoder(geocoder: geocoder, maxRequests: maxRequests)
         let keys = ContactKeys(contactKeys + [CNContactPostalAddressesKey as CNKeyDescriptor])
         contactActor = ContactActor(geocoder: limiter, contactKeys: keys)
         authorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
@@ -108,6 +112,21 @@ public final class ContactHistoryFetcher {
 
     public func fetchBy(_ postalAddress: CNLabeledValue<CNPostalAddress>, contact: CNContact) -> ContactLocationAnnotation? {
         contactLocationAnnotations.first(where: { $0.contact == contact && $0.labeledAddress == postalAddress })
+    }
+
+    /// Geocodes with the given geocoder from the next address on, including in a sync that is
+    /// running. Locations already stored are kept, and the request count carries over.
+    public func setGeocoder(_ geocoder: any Geocoder) async {
+        await limiter.setGeocoder(geocoder)
+    }
+
+    /// Like `setGeocoder(_:)`, with the MapKit, Mapsi and Google chain the matching init builds.
+    public func setGeocoder(mapsiAPIKey: String? = nil,
+                            googleAPIKey: String? = nil,
+                            includesMapKit: Bool = true) async {
+        await setGeocoder(GeocoderFactory.makeDefault(mapsiAPIKey: mapsiAPIKey,
+                                                      googleAPIKey: googleAPIKey,
+                                                      includesMapKit: includesMapKit))
     }
 
     /// Forgets every stored location, starts the request count from zero and geocodes every

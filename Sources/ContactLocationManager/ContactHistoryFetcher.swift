@@ -34,20 +34,16 @@ public final class ContactHistoryFetcher {
     /// Cleared by `setMaxRequests(_:)` once the limit is raised.
     public private(set) var hasReachedRequestLimit = false
 
-    /// True while a sync is paused because the network is down. It resumes by itself when
-    /// connectivity returns.
-    public private(set) var isOffline = false
-
     @ObservationIgnored private let contactActor: ContactActor
     @ObservationIgnored private let limiter: RequestLimitedGeocoder
     @ObservationIgnored private var isFetching = false
+    @ObservationIgnored private var contactChangeObservation: Task<Void, Never>?
     @ObservationIgnored private var needsAnotherFetch = false
     @ObservationIgnored private var startOver = false
 
-    /// Doesn't sync by itself: the host calls `fetchChanges()` when it's ready, for example once it knows
-    /// the request limit. If access has already been granted, the locations stored by earlier syncs are
+    /// Doesn't sync by itself: the host calls `start()` when it's ready, for example once it knows the
+    /// request limit. If access has already been granted, the locations stored by earlier syncs are
     /// published right away. Otherwise the host calls `requestAccess()` when it's ready to show the system prompt.
-    /// Contacts are only read again when the host calls `fetchChanges()`.
     /// Geocoding tries MapKit first, then Mapsi, then Google. A provider without a key is left out,
     /// and MapKit is left out when `includesMapKit` is false, for example to test another provider alone.
     /// `maxRequests` is the total number of addresses that will ever be geocoded, or `nil` for no
@@ -96,13 +92,30 @@ public final class ContactHistoryFetcher {
         authorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
     }
 
-    /// Asks Contacts for the changes since the last sync and applies them. Does nothing until
-    /// access has been granted.
+    /// Syncs now, and again whenever the contact store changes. Call it once the host is ready, for example
+    /// after `requestAccess()` and once the request limit is set. Calling it again just syncs again.
     ///
-    /// The fetcher doesn't watch for `CNContactStoreDidChange` itself, so the host decides when to
-    /// sync, for example when the app becomes active or while it listens for that notification.
-    /// If the network goes down mid-sync, the sync pauses (`isOffline`) and starts again from the
-    /// saved history token when connectivity returns.
+    /// The fetcher listens for `CNContactStoreDidChange` from here on. The system delivers a change made
+    /// while the app was away once the app is active again, so the host needs no foreground handling.
+    public func start() async {
+        // Listening starts before the first sync, so a change arriving in between isn't missed.
+        if contactChangeObservation == nil {
+            contactChangeObservation = Task { [weak self] in
+                for await _ in NotificationCenter.default.notifications(named: .CNContactStoreDidChange) {
+                    guard let self else { return }
+                    await fetchChanges()
+                }
+            }
+        }
+        await fetchChanges()
+    }
+
+    /// Asks Contacts for the changes since the last sync and applies them. Does nothing until
+    /// access has been granted. `start()` already does this on every contact change; call it directly
+    /// only to sync at another moment.
+    ///
+    /// If the network goes down mid-sync, the sync stops without saving the history token, so the next
+    /// sync reads the same changes again.
     /// Calls that overlap are folded together: a call made during a sync returns at once, and the
     /// running sync reads the changes again straight afterwards.
     public func fetchChanges() async {
@@ -176,7 +189,6 @@ public final class ContactHistoryFetcher {
             if startOver {
                 startOver = false
                 await contactActor.saveToken(nil)
-                isOffline = false
                 await contactActor.removeAll()
                 contactLocationAnnotations = []
                 continue
@@ -211,15 +223,12 @@ public final class ContactHistoryFetcher {
             do {
                 try await contactActor.apply(change)
             } catch {
-                isOffline = true
                 await loadContactLocationAnnotations()
                 return
             }
             syncProgress = Double(index + 1) / Double(changes.count)
             guard !startOver else { return }
         }
-
-        isOffline = false
 
         await contactActor.saveToken(token)
 

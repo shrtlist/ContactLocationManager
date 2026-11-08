@@ -61,10 +61,6 @@ struct ContentView: View {
                 }
 
                 Section("Sync") {
-                    if fetcher.isOffline {
-                        Text("Offline, waiting to resume")
-                            .foregroundStyle(.orange)
-                    }
                     if let progress = fetcher.syncProgress {
                         ProgressView(value: progress)
                     }
@@ -93,13 +89,11 @@ struct ContentView: View {
                 await model.refreshCounts()
             }
             .task {
-                await fetcher.fetchChanges()
+                await fetcher.start()
             }
-            .task {
-                for await _ in NotificationCenter.default.notifications(named: .CNContactStoreDidChange) {
-                    await fetcher.fetchChanges()
-                    await model.refreshCounts()
-                }
+            // Each CNContactStoreDidChange triggers a sync, so counts are read again when one finishes.
+            .task(id: fetcher.syncProgress == nil) {
+                await model.refreshCounts()
             }
         }
     }

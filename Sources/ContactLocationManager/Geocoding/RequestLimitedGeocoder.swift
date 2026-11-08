@@ -7,7 +7,7 @@
 import CoreLocation
 
 /// Allows at most `maxRequests` geocodes in total, counted across launches. Once the limit is
-/// reached it throws `.rateLimited` without calling the underlying geocoder.
+/// reached it throws `.requestLimitReached` without calling the underlying geocoder.
 /// A `nil` limit means no limit.
 actor RequestLimitedGeocoder: Geocoder {
     private var geocoder: any Geocoder
@@ -34,7 +34,7 @@ actor RequestLimitedGeocoder: Geocoder {
     func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
         if let maxRequests, count >= maxRequests {
             defaults.set(true, forKey: refusedKey)
-            throw .rateLimited
+            throw .requestLimitReached
         }
 
         // Reserve before awaiting so overlapping requests can't overshoot the limit.

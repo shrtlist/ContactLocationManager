@@ -227,7 +227,11 @@ public final class ContactHistoryFetcher {
         if !changes.isEmpty || contactLocationAnnotations.isEmpty {
             await loadContactLocationAnnotations()
         }
-        isRateLimited = await limiter.didRefuse
+        let didRefuse = await limiter.didRefuse
+        if didRefuse, !isRateLimited {
+            Logger.geocoding.info("Request limit reached, skipping addresses until it is raised")
+        }
+        isRateLimited = didRefuse
     }
 
     /// If the contacts can't be read, keeps what is on the map rather than blanking it.

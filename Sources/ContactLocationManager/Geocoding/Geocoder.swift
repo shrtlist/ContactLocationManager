@@ -10,6 +10,9 @@ import CoreLocation
 public enum GeocodingError: Error, Sendable {
     /// Quota or throttling hit. The provider should be skipped for a while.
     case rateLimited
+    /// The host's own request limit (`maxRequests`) is used up. Nothing was sent to a provider, and the
+    /// address is geocoded once the limit is raised.
+    case requestLimitReached
     /// Network failure or server error.
     case unavailable
     /// Bad or missing credentials. A configuration bug, but another provider may still work.

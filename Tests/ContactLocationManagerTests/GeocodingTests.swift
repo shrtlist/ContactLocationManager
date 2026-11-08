@@ -219,7 +219,7 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
         let geocoder = RequestLimitedGeocoder(geocoder: base, maxRequests: 2, defaults: makeDefaults())
         _ = try await geocoder.coordinate(for: address)
         _ = try await geocoder.coordinate(for: address)
-        await #expect(throws: GeocodingError.rateLimited) { try await geocoder.coordinate(for: address) }
+        await #expect(throws: GeocodingError.requestLimitReached) { try await geocoder.coordinate(for: address) }
         #expect(base.calls == 2)
         #expect(await geocoder.didRefuse)
     }

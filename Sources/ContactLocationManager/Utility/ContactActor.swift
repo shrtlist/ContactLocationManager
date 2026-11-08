@@ -136,6 +136,10 @@ actor ContactActor {
             return coordinate
         } catch .offline {
             throw .offline
+        } catch .requestLimitReached {
+            // Expected once the host's limit is used up, and every remaining address hits it, so it isn't
+            // logged per address. The fetcher logs it once when the pass ends.
+            return nil
         } catch {
             // The address is personal data, so it stays redacted in the unified log.
             Logger.geocoding.error("Geocoding failure for \(address.addressString, privacy: .private): \(error, privacy: .public)")

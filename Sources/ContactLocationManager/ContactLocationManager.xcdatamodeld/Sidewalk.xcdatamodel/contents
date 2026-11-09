@@ -12,6 +12,16 @@
             </uniquenessConstraint>
         </uniquenessConstraints>
     </entity>
+    <entity name="FailedAddress" representedClassName="FailedAddress" syncable="YES">
+        <attribute name="contactId" attributeType="String" syncable="YES"/>
+        <attribute name="postalAddressId" attributeType="String" syncable="YES"/>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="contactId"/>
+                <constraint value="postalAddressId"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+    </entity>
     <entity name="SyncToken" representedClassName="SyncToken" syncable="YES">
         <attribute name="data" attributeType="Binary" syncable="YES"/>
     </entity>

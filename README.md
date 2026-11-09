@@ -52,6 +52,7 @@ The fetcher doesn't sync by itself. Call `start()` when you're ready, for exampl
 | Property | Meaning |
 | --- | --- |
 | `contactLocationAnnotations: [ContactLocationAnnotation]` | Every geocoded address, as an `MKAnnotation` with `contact`, `labeledAddress`, `coordinate`, `title` (the contact's name) and `subtitle` (the address). Replaced when a sync pass finishes. Use the `contactKeys:` init parameter to choose which contact fields `contact` has loaded. |
+| `ungeocodedAddresses: [UngeocodedAddress]` | Addresses no provider could find (a definite "no match"), each with `contact` (ready for `CNContactViewController(for:)`), `labeledAddress`, `title` and `subtitle`. Addresses skipped for another reason, such as being offline or reaching the request limit, aren't listed. Remembered between launches, and replaced when a sync pass finishes. Show a warning button when it isn't empty, list the addresses, and present the tapped contact in `CNContactViewController` with editing allowed: saving the contact makes the next sync look the address up again, and it leaves the list if it now matches. |
 | `authorizationStatus: CNAuthorizationStatus` | The current Contacts permission. |
 | `syncProgress: Double?` | 0...1 while contacts are being processed, `nil` when idle. Counts contacts, not addresses. |
 | `hasReachedRequestLimit: Bool` | True when addresses were skipped because the request limit was reached. |

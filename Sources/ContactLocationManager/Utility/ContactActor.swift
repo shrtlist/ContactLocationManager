@@ -63,7 +63,33 @@ actor ContactActor {
         }
     }
 
-    /// Throws .offline before touching the store if the change couldn't be geocoded.
+    /// The addresses a provider found no match for, with their contacts looked up in one request.
+    /// With the right `extraKeys` the contacts carry what `CNContactViewController(for:)` needs, so the host can show them as given.
+    /// `extraKeys` come from the caller because `CNContactViewController`'s descriptor is main-actor isolated.
+    func fetchFailedAddresses(extraKeys: ContactKeys) async throws -> [UngeocodedAddress] {
+        let failures = await SkopelosClient.shared.read { context in
+            FailedAddress.SK_all(context).map { (contactId: $0.contactId, postalAddressId: $0.postalAddressId) }
+        }
+
+        guard !failures.isEmpty else { return [] }
+
+        let fetchRequest = CNContactFetchRequest(keysToFetch: contactKeys.descriptors + extraKeys.descriptors)
+        fetchRequest.predicate = CNContact.predicateForContacts(withIdentifiers: failures.map(\.contactId))
+
+        var contactsById = [String: CNContact]()
+
+        try CNContactStore().enumerateContacts(with: fetchRequest) { (contact, stopPointer) in
+            contactsById[contact.identifier] = contact
+        }
+
+        return failures.compactMap { failure in
+            guard let contact = contactsById[failure.contactId],
+                  let labeledAddress = contact.postalAddresses.first(where: { $0.identifier == failure.postalAddressId }) else { return nil }
+            return UngeocodedAddress(contact: contact, labeledAddress: labeledAddress)
+        }
+    }
+
+    /// Throws .offline or .cancelled before touching the store if the change couldn't be geocoded.
     func apply(_ change: ContactHistoryChange) async throws(GeocodingError) {
         switch change {
         case .removeAll: removeAll()
@@ -76,6 +102,7 @@ actor ContactActor {
     func removeAll() {
         SkopelosClient.shared.writeSync { context in
             ContactLocation.SK_removeAll(context)
+            FailedAddress.SK_removeAll(context)
         }
     }
 
@@ -85,17 +112,27 @@ actor ContactActor {
     }
 
     func update(with contact: CNContact) async throws(GeocodingError) {
-        let coordinates = try await geocode(contact)
+        let result = try await geocode(contact)
 
         SkopelosClient.shared.writeSync { context in
             Self.delete(contactIdentifier: contact.identifier, in: context)
-            Self.createLocations(for: contact, coordinates: coordinates, in: context)
+            Self.createLocations(for: contact, coordinates: result.coordinates, in: context)
+            Self.createFailedAddresses(for: contact, addressIds: result.noMatchAddressIds, in: context)
         }
     }
     
     func delete(contactIdentifier: String) {
         SkopelosClient.shared.writeSync { context in
             Self.delete(contactIdentifier: contactIdentifier, in: context)
+        }
+    }
+
+    /// Postal address identifiers stored for the contact, for tests.
+    func storedAddressIds(forContactId contactId: String) async -> (located: Set<String>, failed: Set<String>) {
+        await SkopelosClient.shared.read { context in
+            let located = ContactLocation.SK_all("contactId", isEqualTo: contactId, sortTerms: "contactId", ascending: false, context: context)
+            let failed = FailedAddress.SK_all("contactId", isEqualTo: contactId, sortTerms: "contactId", ascending: false, context: context)
+            return (Set(located.map(\.postalAddressId)), Set(failed.map(\.postalAddressId)))
         }
     }
 
@@ -114,44 +151,78 @@ actor ContactActor {
     
     // MARK: - Private API
 
-    /// Geocodes each postal address of the contact, keyed by postal address identifier.
-    /// Addresses that can't be geocoded are omitted. Throws `.offline` so the sync can pause.
-    private func geocode(_ contact: CNContact) async throws(GeocodingError) -> [String: CLLocationCoordinate2D] {
+    private struct GeocodeResult {
+        /// Keyed by postal address identifier.
         var coordinates: [String: CLLocationCoordinate2D] = [:]
-        for address in contact.postalAddresses {
-            if let coordinate = try await geocode(address.value) {
-                coordinates[address.identifier] = coordinate
-            }
-        }
-        return coordinates
+        /// Addresses a provider answered with "no match", for the user to correct.
+        var noMatchAddressIds: [String] = []
     }
 
-    private func geocode(_ address: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
+    private enum Lookup {
+        case located(CLLocationCoordinate2D)
+        case noMatch
+        /// Not looked up, or the lookup failed. Nothing is known about the address, so it isn't reported.
+        case skipped
+    }
+
+    /// Geocodes each postal address of the contact. Throws `.offline` or `.cancelled` so the sync can pause.
+    private func geocode(_ contact: CNContact) async throws(GeocodingError) -> GeocodeResult {
+        var result = GeocodeResult()
+        for address in contact.postalAddresses {
+            switch try await geocode(address.value) {
+            case .located(let coordinate): result.coordinates[address.identifier] = coordinate
+            case .noMatch: result.noMatchAddressIds.append(address.identifier)
+            case .skipped: break
+            }
+        }
+        return result
+    }
+
+    private func geocode(_ address: CNPostalAddress) async throws(GeocodingError) -> Lookup {
         do throws(GeocodingError) {
-            let coordinate = try await geocoder.coordinate(for: address)
-            if coordinate == nil {
+            guard let coordinate = try await geocoder.coordinate(for: address) else {
                 // The address is personal data, so it stays redacted in the unified log.
                 Logger.geocoding.notice("No match for \(address.addressString, privacy: .private)")
+                return .noMatch
             }
-            return coordinate
+            return .located(coordinate)
         } catch .offline {
             throw .offline
+        } catch .cancelled {
+            throw .cancelled
         } catch .requestLimitReached {
             // Expected once the host's limit is used up, and every remaining address hits it, so it isn't
             // logged per address. The fetcher logs it once when the pass ends.
-            return nil
+            return .skipped
         } catch {
+            // A single provider reports a cancelled request as an ordinary failure, so ask the task itself.
+            // Storing "no match" here would lose the address for good once the token moves on.
+            if Task.isCancelled { throw .cancelled }
             // The address is personal data, so it stays redacted in the unified log.
             Logger.geocoding.error("Geocoding failure for \(address.addressString, privacy: .private): \(error, privacy: .public)")
-            return nil
+            return .skipped
         }
     }
-    
+
     private static func delete(contactIdentifier: String, in context: NSManagedObjectContext) {
         let contactLocations = ContactLocation.SK_all("contactId", isEqualTo: contactIdentifier, sortTerms: "contactId", ascending: false, context: context)
         
         for contactLocation in contactLocations {
             contactLocation.SK_remove(context)
+        }
+
+        let failedAddresses = FailedAddress.SK_all("contactId", isEqualTo: contactIdentifier, sortTerms: "contactId", ascending: false, context: context)
+
+        for failedAddress in failedAddresses {
+            failedAddress.SK_remove(context)
+        }
+    }
+
+    private static func createFailedAddresses(for contact: CNContact, addressIds: [String], in context: NSManagedObjectContext) {
+        for addressId in addressIds {
+            let failedAddress = FailedAddress.SK_create(context)
+            failedAddress.contactId = contact.identifier
+            failedAddress.postalAddressId = addressId
         }
     }
 

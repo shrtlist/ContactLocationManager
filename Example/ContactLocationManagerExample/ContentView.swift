@@ -11,6 +11,7 @@ import ContactLocationManager
 
 struct ContentView: View {
     @Bindable var model: ExampleModel
+    @State private var showsUngeocodedAddresses = false
 
     private var fetcher: ContactHistoryFetcher { model.fetcher }
     private var isSyncing: Bool { fetcher.syncProgress != nil }
@@ -57,7 +58,7 @@ struct ContentView: View {
                 } header: {
                     Text("Geocoding")
                 } footer: {
-                    Text("The mock geocoder returns a random coordinate for each address, without the network. Mapsi and Google need keys in Keys.plist. MapKit can be turned off while another provider is on. Geocoders can't be switched during a sync, and only affect addresses geocoded from then on; reset to geocode everything again.")
+                    Text("The mock geocoder returns a random coordinate for each address, without the network, and finds no match for an address with an empty street. Mapsi and Google need keys in Keys.plist. MapKit can be turned off while another provider is on. Geocoders can't be switched during a sync, and only affect addresses geocoded from then on; reset to geocode everything again.")
                 }
 
                 Section("Sync") {
@@ -65,6 +66,7 @@ struct ContentView: View {
                         ProgressView(value: progress)
                     }
                     LabeledContent("Locations", value: "\(fetcher.contactLocationAnnotations.count)")
+                    LabeledContent("Not found", value: "\(fetcher.ungeocodedAddresses.count)")
                     Button("Reset and Geocode Again", role: .destructive) {
                         Task { await fetcher.reset() }
                     }
@@ -84,6 +86,17 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("Example")
+            .toolbar {
+                if !fetcher.ungeocodedAddresses.isEmpty {
+                    Button("Addresses Not Found", systemImage: "exclamationmark.triangle.fill") {
+                        showsUngeocodedAddresses = true
+                    }
+                    .tint(.orange)
+                }
+            }
+            .sheet(isPresented: $showsUngeocodedAddresses) {
+                UngeocodedAddressesView(fetcher: fetcher)
+            }
             .task(id: fetcher.authorizationStatus) {
                 guard fetcher.authorizationStatus == .authorized || fetcher.authorizationStatus == .limited else { return }
                 await model.refreshCounts()

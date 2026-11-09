@@ -11,6 +11,7 @@
 
 @preconcurrency import Contacts
 import ContactsChangeHistory
+import ContactsUI
 import CoreLocation
 import Network
 import Observation
@@ -25,6 +26,7 @@ import OSLog
 public final class ContactHistoryFetcher {
     // `internal(set)` so tests can seed annotations without a contact store.
     public internal(set) var contactLocationAnnotations: [ContactLocationAnnotation] = []
+    public internal(set) var ungeocodedAddresses: [UngeocodedAddress] = []
     public private(set) var authorizationStatus: CNAuthorizationStatus
 
     /// 0...1 while contacts are being processed, `nil` when idle.
@@ -191,6 +193,7 @@ public final class ContactHistoryFetcher {
                 await contactActor.saveToken(nil)
                 await contactActor.removeAll()
                 contactLocationAnnotations = []
+                ungeocodedAddresses = []
                 continue
             }
             needsAnotherFetch = false
@@ -249,6 +252,11 @@ public final class ContactHistoryFetcher {
             contactLocationAnnotations = try await contactActor.fetchAll()
         } catch {
             Logger.contacts.error("Contact fetch failed: \(error, privacy: .public)")
+        }
+        do {
+            ungeocodedAddresses = try await contactActor.fetchFailedAddresses(extraKeys: ContactKeys([CNContactViewController.descriptorForRequiredKeys()]))
+        } catch {
+            Logger.contacts.error("Ungeocoded address fetch failed: \(error, privacy: .public)")
         }
     }
 

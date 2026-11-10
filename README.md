@@ -45,7 +45,7 @@ let fetcher = ContactHistoryFetcher(mapsiAPIKey: mapsiKey, googleAPIKey: googleK
 await fetcher.requestAccess()
 ```
 
-The fetcher doesn't sync by itself. Call `start()` when you're ready, for example once access is granted and your request limit is known. It syncs now and again on every contact change, so the host doesn't listen for `CNContactStoreDidChange`. A sync that stopped early, for example because the device was offline, tries again by itself when the app next becomes active, and one that stopped because every provider was rate limited tries again after the providers' 60 second cooldown. If access has already been granted, the locations stored by earlier syncs are published as soon as it is created.
+The fetcher doesn't sync by itself. Call `start()` when you're ready, for example once access is granted and your request limit is known. It syncs now and again on every contact change, so the host doesn't listen for `CNContactStoreDidChange`. A sync that stopped early, for example because the device was offline, tries again by itself when the app next becomes active, and one that stopped because every provider was rate limited tries again after the providers' 60 second cooldown. Addresses that couldn't be looked up because of a provider error or the request limit are remembered too, and looked up again each time the app becomes active. If access has already been granted, the locations stored by earlier syncs are published as soon as it is created.
 
 `ContactHistoryFetcher` is `@MainActor` and `@Observable`. Read these properties and react when they change:
 
@@ -89,7 +89,7 @@ let fetcher = ContactHistoryFetcher(
 ```
 
 - The count is saved across launches, and only `reset()` sets it back to zero. One address is one request, even if it falls through several providers. A request that fails with an error is not counted.
-- Once the cap is reached the remaining addresses are skipped without calling any provider, and `hasReachedRequestLimit` becomes true. Showing an alert or a paywall is up to your app.
+- Once the cap is reached the remaining addresses are skipped without calling any provider, and `hasReachedRequestLimit` becomes true. The skipped addresses are remembered, so `setMaxRequests(_:)` with a higher limit (or `nil`) looks up only those; addresses that already have an answer are not looked up again and nothing stored is cleared. Showing an alert or a paywall is up to your app.
 - Call `await fetcher.setMaxRequests(nil)` (or a larger number) to change the cap, for example when the user subscribes. If addresses had been skipped and the new cap lets them through, the package clears its stored locations and sync token and geocodes everything again.
 
 ### Starting over

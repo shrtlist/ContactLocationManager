@@ -38,6 +38,17 @@ private struct PickyGeocoder: Geocoder {
         return (contact, contact.postalAddresses.map(\.identifier))
     }
 
+    /// The same contact and address identifiers with other street text, as after the user edits the address.
+    private func edited(_ contact: CNContact, street: String) -> CNContact {
+        let copy = contact.mutableCopy() as! CNMutableContact
+        copy.postalAddresses = contact.postalAddresses.map { labeled in
+            let address = labeled.value.mutableCopy() as! CNMutablePostalAddress
+            address.street = street
+            return labeled.settingValue(address as CNPostalAddress)
+        }
+        return copy
+    }
+
     private func actor(_ geocoder: any Geocoder) -> ContactActor {
         ContactActor(geocoder: geocoder, contactKeys: ContactKeys([]))
     }
@@ -76,7 +87,7 @@ private struct PickyGeocoder: Geocoder {
         try await actor.apply(.insert(contact))
 
         geocoder.answer = .coordinate
-        try await actor.apply(.update(contact))
+        try await actor.apply(.update(edited(contact, street: "1 Main St")))
 
         let stored = await actor.storedAddressIds(forContactId: contact.identifier)
         #expect(stored.failed.isEmpty)
@@ -85,7 +96,7 @@ private struct PickyGeocoder: Geocoder {
         await actor.delete(contactIdentifier: contact.identifier)
     }
 
-    @Test(arguments: [GeocodingError.requestLimitReached, .unavailable, .unauthorized, .rateLimited, .invalidRequest])
+    @Test(arguments: [GeocodingError.requestLimitReached, .unavailable, .unauthorized, .invalidRequest])
     func doesNotRecordAnAddressThatWasNeverAnswered(error: GeocodingError) async throws {
         let actor = actor(ScriptedGeocoder(.failure(error)))
         let (contact, _) = self.contact(streets: ["1 Main St"])
@@ -99,7 +110,7 @@ private struct PickyGeocoder: Geocoder {
         await actor.delete(contactIdentifier: contact.identifier)
     }
 
-    @Test(arguments: [GeocodingError.offline, .cancelled])
+    @Test(arguments: [GeocodingError.offline, .rateLimited, .cancelled])
     func leavesTheStoreAloneWhenTheSyncPauses(error: GeocodingError) async throws {
         let geocoder = ScriptedGeocoder(.noMatch)
         let actor = actor(geocoder)
@@ -107,7 +118,8 @@ private struct PickyGeocoder: Geocoder {
         try await actor.apply(.insert(contact))
 
         geocoder.answer = .failure(error)
-        await #expect(throws: error) { try await actor.apply(.update(contact)) }
+        // Edited, so the address is looked up again; an unchanged one wouldn't be asked.
+        await #expect(throws: error) { try await actor.apply(.update(edited(contact, street: "Bad Rd"))) }
 
         let stored = await actor.storedAddressIds(forContactId: contact.identifier)
         #expect(stored.failed == Set(ids))

@@ -16,6 +16,7 @@ import CoreLocation
 import Network
 import Observation
 import OSLog
+import UIKit
 
 /// Create one per process and keep it for the life of the app; change its geocoder with
 /// `setGeocoder` rather than making another. Every fetcher shares the same
@@ -40,8 +41,14 @@ public final class ContactHistoryFetcher {
     @ObservationIgnored private let limiter: RequestLimitedGeocoder
     @ObservationIgnored private var isFetching = false
     @ObservationIgnored private var contactChangeObservation: Task<Void, Never>?
+    @ObservationIgnored private var foregroundObservation: Task<Void, Never>?
+    /// Waits out a provider's cooldown, then syncs again. At most one is pending.
+    @ObservationIgnored private var cooldownRetry: Task<Void, Never>?
+    /// True when the last pass stopped early, so the next time the app becomes active it syncs again.
+    @ObservationIgnored private var retryWhenActive = false
     @ObservationIgnored private var needsAnotherFetch = false
     @ObservationIgnored private var startOver = false
+    @ObservationIgnored private var isStarted = false
 
     /// Doesn't sync by itself: the host calls `start()` when it's ready, for example once it knows the
     /// request limit. If access has already been granted, the locations stored by earlier syncs are
@@ -100,12 +107,21 @@ public final class ContactHistoryFetcher {
     /// The fetcher listens for `CNContactStoreDidChange` from here on. The system delivers a change made
     /// while the app was away once the app is active again, so the host needs no foreground handling.
     public func start() async {
+        isStarted = true
         // Listening starts before the first sync, so a change arriving in between isn't missed.
         if contactChangeObservation == nil {
             contactChangeObservation = Task { [weak self] in
                 for await _ in NotificationCenter.default.notifications(named: .CNContactStoreDidChange) {
                     guard let self else { return }
                     await fetchChanges()
+                }
+            }
+        }
+        if foregroundObservation == nil {
+            foregroundObservation = Task { [weak self] in
+                for await _ in NotificationCenter.default.notifications(named: UIApplication.didBecomeActiveNotification) {
+                    guard let self else { return }
+                    if retryWhenActive { await fetchChanges() }
                 }
             }
         }
@@ -117,7 +133,9 @@ public final class ContactHistoryFetcher {
     /// only to sync at another moment.
     ///
     /// If the network goes down mid-sync, the sync stops without saving the history token, so the next
-    /// sync reads the same changes again.
+    /// sync reads the same changes again. A sync that stopped early, for example offline, tries again by itself
+    /// the next time the app becomes active, and one that stopped because every provider was rate limited tries
+    /// again when the providers' cooldown is over. Both need `start()` to have been called.
     /// Calls that overlap are folded together: a call made during a sync returns at once, and the
     /// running sync reads the changes again straight afterwards.
     public func fetchChanges() async {
@@ -149,28 +167,39 @@ public final class ContactHistoryFetcher {
     /// Forgets every stored location, starts the request count from zero and geocodes every
     /// contact again. If a sync is running, it stops after the contact it is on and the new one
     /// starts then, which may be after this returns.
+    /// Until `start()` has been called and access has been granted, nothing is cleared or geocoded:
+    /// the reset waits for the first sync.
     public func reset() async {
         await limiter.resetCount()
         hasReachedRequestLimit = false
         startOver = true
-        await requestSync()
+        await syncIfReady()
     }
 
     /// Changes the request limit, for example when the user subscribes. If contacts were skipped
     /// under the old limit and the new one lets them through, everything is geocoded again.
     /// If a sync is running, it stops after the contact it is on and the new one starts then,
     /// which may be after this returns.
+    /// Until `start()` has been called and access has been granted, nothing is cleared or geocoded:
+    /// the new limit applies from the first sync.
     public func setMaxRequests(_ maxRequests: Int?) async {
         guard await limiter.setMaxRequests(maxRequests) else { return }
         hasReachedRequestLimit = false
         startOver = true
-        await requestSync()
+        await syncIfReady()
     }
 
     // MARK: - Private API
 
     private var hasAccess: Bool {
         authorizationStatus == .authorized || authorizationStatus == .limited
+    }
+
+    /// For calls that aren't asking for a sync themselves, so they can't start one before the host is ready.
+    private func syncIfReady() async {
+        authorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
+        guard isStarted, hasAccess else { return }
+        await requestSync()
     }
 
     private func requestSync() async {
@@ -204,6 +233,11 @@ public final class ContactHistoryFetcher {
     /// Stops after the current contact once a clear has been asked for, so no more geocoding
     /// requests are spent on work the clear will throw away.
     private func fetchChangesOnce() async {
+        // This pass replaces any retry that is still waiting.
+        cooldownRetry?.cancel()
+        cooldownRetry = nil
+        retryWhenActive = false
+
         let startingToken = await contactActor.savedToken()
         let token: Data?
         let changes: [ContactHistoryChange]
@@ -215,6 +249,8 @@ public final class ContactHistoryFetcher {
 
             if startingToken != nil, code == .changeHistoryExpired || code == .changeHistoryInvalidAnchor {
                 startOver = true
+            } else {
+                retryWhenActive = true
             }
             return
         }
@@ -226,6 +262,8 @@ public final class ContactHistoryFetcher {
             do {
                 try await contactActor.apply(change)
             } catch {
+                retryWhenActive = true
+                if error == .rateLimited { retryAfterCooldown() }
                 await loadContactLocationAnnotations()
                 return
             }
@@ -244,6 +282,18 @@ public final class ContactHistoryFetcher {
             Logger.geocoding.info("Request limit reached, skipping addresses until it is raised")
         }
         hasReachedRequestLimit = hasRefusedRequests
+    }
+
+    /// Every provider is rate limited and skipped for `providerCooldown`, so asking sooner would only be refused.
+    private func retryAfterCooldown() {
+        cooldownRetry?.cancel()
+        cooldownRetry = Task { [weak self] in
+            do { try await Task.sleep(for: providerCooldown) } catch { return }
+            guard let self else { return }
+            // Cleared first: the sync below must not cancel the task it is running on.
+            cooldownRetry = nil
+            await fetchChanges()
+        }
     }
 
     /// If the contacts can't be read, keeps what is on the map rather than blanking it.

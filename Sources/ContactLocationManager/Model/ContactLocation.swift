@@ -17,4 +17,5 @@ final class ContactLocation: NSManagedObject {
     @NSManaged var latitude: CLLocationDegrees
     @NSManaged var longitude: CLLocationDegrees
     @NSManaged var postalAddressId: String
+    @NSManaged var addressFingerprint: String
 }

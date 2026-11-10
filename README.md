@@ -45,7 +45,7 @@ let fetcher = ContactHistoryFetcher(mapsiAPIKey: mapsiKey, googleAPIKey: googleK
 await fetcher.requestAccess()
 ```
 
-The fetcher doesn't sync by itself. Call `start()` when you're ready, for example once access is granted and your request limit is known. It syncs now and again on every contact change, so the host doesn't listen for `CNContactStoreDidChange`. If access has already been granted, the locations stored by earlier syncs are published as soon as it is created.
+The fetcher doesn't sync by itself. Call `start()` when you're ready, for example once access is granted and your request limit is known. It syncs now and again on every contact change, so the host doesn't listen for `CNContactStoreDidChange`. A sync that stopped early, for example because the device was offline, tries again by itself when the app next becomes active, and one that stopped because every provider was rate limited tries again after the providers' 60 second cooldown. If access has already been granted, the locations stored by earlier syncs are published as soon as it is created.
 
 `ContactHistoryFetcher` is `@MainActor` and `@Observable`. Read these properties and react when they change:
 

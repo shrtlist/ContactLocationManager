@@ -12,4 +12,5 @@ import CoreData
 final class FailedAddress: NSManagedObject {
     @NSManaged var contactId: String
     @NSManaged var postalAddressId: String
+    @NSManaged var addressFingerprint: String
 }

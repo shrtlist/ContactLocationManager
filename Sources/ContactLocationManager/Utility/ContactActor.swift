@@ -89,7 +89,7 @@ actor ContactActor {
         }
     }
 
-    /// Throws .offline or .cancelled before touching the store if the change couldn't be geocoded.
+    /// Throws .offline, .rateLimited or .cancelled before touching the store if the change couldn't be geocoded.
     func apply(_ change: ContactHistoryChange) async throws(GeocodingError) {
         switch change {
         case .removeAll: removeAll()
@@ -111,13 +111,19 @@ actor ContactActor {
         try await update(with: contact)
     }
 
+    /// Looks up only the addresses whose text changed since they were last answered, so an edit to something
+    /// else, or a replay of the same history, costs no requests and can't lose a pin that is still right.
+    ///
+    /// For each address: an unchanged one is left as it is; a found one is stored; a "no match" is recorded for
+    /// the user to correct; one that couldn't be asked loses its old pin, because the address changed and the
+    /// old pin belongs to a different one.
     func update(with contact: CNContact) async throws(GeocodingError) {
-        let result = try await geocode(contact)
+        let answered = await answeredFingerprints(forContactId: contact.identifier)
+        let needsLookup = contact.postalAddresses.filter { answered[$0.identifier] != $0.value.fingerprint }
+        let lookups = try await geocode(needsLookup)
 
         SkopelosClient.shared.writeSync { context in
-            Self.delete(contactIdentifier: contact.identifier, in: context)
-            Self.createLocations(for: contact, coordinates: result.coordinates, in: context)
-            Self.createFailedAddresses(for: contact, addressIds: result.noMatchAddressIds, in: context)
+            Self.store(lookups, for: contact, in: context)
         }
     }
     
@@ -136,6 +142,14 @@ actor ContactActor {
         }
     }
 
+    /// Latitude stored for each postal address of the contact, for tests.
+    func storedLatitudes(forContactId contactId: String) async -> [String: Double] {
+        await SkopelosClient.shared.read { context in
+            let rows = ContactLocation.SK_all("contactId", isEqualTo: contactId, sortTerms: "contactId", ascending: false, context: context)
+            return Dictionary(uniqueKeysWithValues: rows.map { ($0.postalAddressId, $0.latitude) })
+        }
+    }
+
     func savedToken() async -> Data? {
         await SkopelosClient.shared.read { context in
             SyncToken.SK_all(context).first?.data
@@ -151,13 +165,6 @@ actor ContactActor {
     
     // MARK: - Private API
 
-    private struct GeocodeResult {
-        /// Keyed by postal address identifier.
-        var coordinates: [String: CLLocationCoordinate2D] = [:]
-        /// Addresses a provider answered with "no match", for the user to correct.
-        var noMatchAddressIds: [String] = []
-    }
-
     private enum Lookup {
         case located(CLLocationCoordinate2D)
         case noMatch
@@ -165,17 +172,29 @@ actor ContactActor {
         case skipped
     }
 
-    /// Geocodes each postal address of the contact. Throws `.offline` or `.cancelled` so the sync can pause.
-    private func geocode(_ contact: CNContact) async throws(GeocodingError) -> GeocodeResult {
-        var result = GeocodeResult()
-        for address in contact.postalAddresses {
-            switch try await geocode(address.value) {
-            case .located(let coordinate): result.coordinates[address.identifier] = coordinate
-            case .noMatch: result.noMatchAddressIds.append(address.identifier)
-            case .skipped: break
-            }
+    /// Geocodes the given addresses, keyed by postal address identifier.
+    /// Throws `.offline`, `.rateLimited` or `.cancelled` so the sync can pause.
+    private func geocode(_ addresses: [CNLabeledValue<CNPostalAddress>]) async throws(GeocodingError) -> [String: Lookup] {
+        var lookups: [String: Lookup] = [:]
+        for address in addresses {
+            lookups[address.identifier] = try await geocode(address.value)
         }
-        return result
+        return lookups
+    }
+
+    /// The fingerprint each of the contact's addresses was last answered for (found or no match), keyed by
+    /// postal address identifier.
+    private func answeredFingerprints(forContactId contactId: String) async -> [String: String] {
+        await SkopelosClient.shared.read { context in
+            var answered: [String: String] = [:]
+            for row in ContactLocation.SK_all("contactId", isEqualTo: contactId, sortTerms: "contactId", ascending: false, context: context) {
+                answered[row.postalAddressId] = row.addressFingerprint
+            }
+            for row in FailedAddress.SK_all("contactId", isEqualTo: contactId, sortTerms: "contactId", ascending: false, context: context) {
+                answered[row.postalAddressId] = row.addressFingerprint
+            }
+            return answered
+        }
     }
 
     private func geocode(_ address: CNPostalAddress) async throws(GeocodingError) -> Lookup {
@@ -190,6 +209,9 @@ actor ContactActor {
             throw .offline
         } catch .cancelled {
             throw .cancelled
+        } catch .rateLimited {
+            // Every provider is cooling down. The address is looked up again once they are back, not stored as no match.
+            throw .rateLimited
         } catch .requestLimitReached {
             // Expected once the host's limit is used up, and every remaining address hits it, so it isn't
             // logged per address. The fetcher logs it once when the pass ends.
@@ -218,22 +240,42 @@ actor ContactActor {
         }
     }
 
-    private static func createFailedAddresses(for contact: CNContact, addressIds: [String], in context: NSManagedObjectContext) {
-        for addressId in addressIds {
-            let failedAddress = FailedAddress.SK_create(context)
-            failedAddress.contactId = contact.identifier
-            failedAddress.postalAddressId = addressId
-        }
-    }
+    /// Brings the contact's rows in line with its current addresses, in one transaction. An address that
+    /// has no entry in `lookups` wasn't looked up because it hasn't changed, and is left alone.
+    private static func store(_ lookups: [String: Lookup], for contact: CNContact, in context: NSManagedObjectContext) {
+        let locations = ContactLocation.SK_all("contactId", isEqualTo: contact.identifier, sortTerms: "contactId", ascending: false, context: context)
+        let failures = FailedAddress.SK_all("contactId", isEqualTo: contact.identifier, sortTerms: "contactId", ascending: false, context: context)
+        let currentIds = Set(contact.postalAddresses.map(\.identifier))
 
-    private static func createLocations(for contact: CNContact, coordinates: [String: CLLocationCoordinate2D], in context: NSManagedObjectContext) {
+        for location in locations where !currentIds.contains(location.postalAddressId) { location.SK_remove(context) }
+        for failure in failures where !currentIds.contains(failure.postalAddressId) { failure.SK_remove(context) }
+
         for address in contact.postalAddresses {
-            guard let coordinate = coordinates[address.identifier] else { continue }
-            let contactLocation = ContactLocation.SK_create(context)
-            contactLocation.contactId = contact.identifier
-            contactLocation.postalAddressId = address.identifier
-            contactLocation.latitude = coordinate.latitude
-            contactLocation.longitude = coordinate.longitude
+            guard let lookup = lookups[address.identifier] else { continue }
+            let fingerprint = address.value.fingerprint
+            let location = locations.first { $0.postalAddressId == address.identifier }
+            let failure = failures.first { $0.postalAddressId == address.identifier }
+
+            switch lookup {
+            case .located(let coordinate):
+                failure?.SK_remove(context)
+                let row = location ?? ContactLocation.SK_create(context)
+                row.contactId = contact.identifier
+                row.postalAddressId = address.identifier
+                row.latitude = coordinate.latitude
+                row.longitude = coordinate.longitude
+                row.addressFingerprint = fingerprint
+            case .noMatch:
+                location?.SK_remove(context)
+                let row = failure ?? FailedAddress.SK_create(context)
+                row.contactId = contact.identifier
+                row.postalAddressId = address.identifier
+                row.addressFingerprint = fingerprint
+            case .skipped:
+                // Only addresses that changed are looked up, so a row here is for the old text.
+                location?.SK_remove(context)
+                failure?.SK_remove(context)
+            }
         }
     }
 }

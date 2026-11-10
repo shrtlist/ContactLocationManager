@@ -6,11 +6,18 @@
 //
 
 import Contacts
+import CryptoKit
 
 extension CNPostalAddress {
     var addressString: String {
         CNPostalAddressFormatter.string(from: self, style: .mailingAddress)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Identifies the text sent to the geocoders: it changes exactly when a lookup would. A hash, so the
+    /// address isn't stored a second time.
+    var fingerprint: String {
+        SHA256.hash(data: Data(addressString.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     /// Address text for display only. Omits the country line; the stored address is unchanged.

@@ -47,6 +47,8 @@ public final class ContactHistoryFetcher {
     /// True when the last pass stopped early, so the next time the app becomes active it syncs again.
     @ObservationIgnored private var retryWhenActive = false
     @ObservationIgnored private var needsAnotherFetch = false
+    /// Addresses that couldn't be asked earlier are looked up again after the next history pass.
+    @ObservationIgnored private var needsRetryPass = false
     @ObservationIgnored private var startOver = false
     @ObservationIgnored private var isStarted = false
 
@@ -106,6 +108,8 @@ public final class ContactHistoryFetcher {
     ///
     /// The fetcher listens for `CNContactStoreDidChange` from here on. The system delivers a change made
     /// while the app was away once the app is active again, so the host needs no foreground handling.
+    /// Each time the app becomes active, addresses that couldn't be looked up earlier (a provider error, or
+    /// the request limit) are looked up again, and a sync that stopped early syncs again.
     public func start() async {
         isStarted = true
         // Listening starts before the first sync, so a change arriving in between isn't missed.
@@ -121,7 +125,7 @@ public final class ContactHistoryFetcher {
             foregroundObservation = Task { [weak self] in
                 for await _ in NotificationCenter.default.notifications(named: UIApplication.didBecomeActiveNotification) {
                     guard let self else { return }
-                    if retryWhenActive { await fetchChanges() }
+                    await syncOnActivation()
                 }
             }
         }
@@ -176,16 +180,15 @@ public final class ContactHistoryFetcher {
         await syncIfReady()
     }
 
-    /// Changes the request limit, for example when the user subscribes. If contacts were skipped
-    /// under the old limit and the new one lets them through, everything is geocoded again.
-    /// If a sync is running, it stops after the contact it is on and the new one starts then,
-    /// which may be after this returns.
-    /// Until `start()` has been called and access has been granted, nothing is cleared or geocoded:
-    /// the new limit applies from the first sync.
+    /// Changes the request limit, for example when the user subscribes. Addresses skipped under the old
+    /// limit are looked up now if the new one lets them through; addresses that already have an answer
+    /// are not looked up again, and nothing stored is cleared.
+    /// Until `start()` has been called and access has been granted, nothing is geocoded: the skipped
+    /// addresses are looked up from the first sync.
     public func setMaxRequests(_ maxRequests: Int?) async {
         guard await limiter.setMaxRequests(maxRequests) else { return }
         hasReachedRequestLimit = false
-        startOver = true
+        needsRetryPass = true
         await syncIfReady()
     }
 
@@ -202,6 +205,15 @@ public final class ContactHistoryFetcher {
         await requestSync()
     }
 
+    /// Looks up again the addresses that couldn't be asked, and syncs if the last pass stopped early.
+    private func syncOnActivation() async {
+        authorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
+        guard hasAccess else { return }
+        needsRetryPass = true
+        if retryWhenActive { needsAnotherFetch = true }
+        await runSync()
+    }
+
     private func requestSync() async {
         needsAnotherFetch = true
         await runSync()
@@ -216,7 +228,7 @@ public final class ContactHistoryFetcher {
         isFetching = true
         defer { isFetching = false }
 
-        while startOver || needsAnotherFetch {
+        while startOver || needsAnotherFetch || needsRetryPass {
             if startOver {
                 startOver = false
                 await contactActor.saveToken(nil)
@@ -225,8 +237,13 @@ public final class ContactHistoryFetcher {
                 ungeocodedAddresses = []
                 continue
             }
-            needsAnotherFetch = false
-            await fetchChangesOnce()
+            if needsAnotherFetch {
+                needsAnotherFetch = false
+                await fetchChangesOnce()
+                continue
+            }
+            needsRetryPass = false
+            await retryPendingOnce()
         }
     }
 
@@ -262,8 +279,7 @@ public final class ContactHistoryFetcher {
             do {
                 try await contactActor.apply(change)
             } catch {
-                retryWhenActive = true
-                if error == .rateLimited { retryAfterCooldown() }
+                pause(after: error)
                 await loadContactLocationAnnotations()
                 return
             }
@@ -284,6 +300,27 @@ public final class ContactHistoryFetcher {
         hasReachedRequestLimit = hasRefusedRequests
     }
 
+    /// Looks up again the addresses that couldn't be asked earlier. Stops, like a history pass, when the
+    /// device is offline, the providers are rate limited or the task is cancelled.
+    private func retryPendingOnce() async {
+        do {
+            if try await contactActor.retryPending() {
+                await loadContactLocationAnnotations()
+            }
+        } catch {
+            pause(after: error)
+            return
+        }
+        hasReachedRequestLimit = await limiter.hasRefusedRequests
+    }
+
+    /// A pass that stopped early syncs again the next time the app becomes active, and after the providers'
+    /// cooldown if they were rate limited.
+    private func pause(after error: GeocodingError) {
+        retryWhenActive = true
+        if error == .rateLimited { retryAfterCooldown() }
+    }
+
     /// Every provider is rate limited and skipped for `providerCooldown`, so asking sooner would only be refused.
     private func retryAfterCooldown() {
         cooldownRetry?.cancel()
@@ -292,6 +329,7 @@ public final class ContactHistoryFetcher {
             guard let self else { return }
             // Cleared first: the sync below must not cancel the task it is running on.
             cooldownRetry = nil
+            needsRetryPass = true
             await fetchChanges()
         }
     }

@@ -150,6 +150,7 @@ private final class CountingGeocoder: Geocoder, @unchecked Sendable {
         } else {
             #expect(stored.located.isEmpty)
             #expect(stored.failed.isEmpty)
+            #expect(stored.pending.count == 1)
         }
         await actor.delete(contactIdentifier: contact.identifier)
     }

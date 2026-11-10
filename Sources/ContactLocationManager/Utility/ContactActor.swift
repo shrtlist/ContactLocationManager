@@ -31,10 +31,15 @@ struct ContactKeys: @unchecked Sendable {
 actor ContactActor {
     private let geocoder: any Geocoder
     private let contactKeys: ContactKeys
+    /// Looks up contacts by identifier for `retryPending()`. Tests replace it, since the contact store
+    /// can't return contacts that were never saved.
+    private let loadContacts: @Sendable (Set<String>, ContactKeys) throws -> [String: CNContact]
 
-    init(geocoder: any Geocoder, contactKeys: ContactKeys) {
+    init(geocoder: any Geocoder, contactKeys: ContactKeys,
+         loadContacts: @escaping @Sendable (Set<String>, ContactKeys) throws -> [String: CNContact] = ContactActor.loadFromContactStore) {
         self.geocoder = geocoder
         self.contactKeys = contactKeys
+        self.loadContacts = loadContacts
     }
 
     /// Builds an annotation for every ContactLocation, looking up only their contacts in one request.
@@ -68,7 +73,7 @@ actor ContactActor {
     /// `extraKeys` come from the caller because `CNContactViewController`'s descriptor is main-actor isolated.
     func fetchFailedAddresses(extraKeys: ContactKeys) async throws -> [UngeocodedAddress] {
         let failures = await SkopelosClient.shared.read { context in
-            FailedAddress.SK_all(context).map { (contactId: $0.contactId, postalAddressId: $0.postalAddressId) }
+            FailedAddress.SK_all(context).filter { !$0.needsRetry }.map { (contactId: $0.contactId, postalAddressId: $0.postalAddressId) }
         }
 
         guard !failures.isEmpty else { return [] }
@@ -115,8 +120,8 @@ actor ContactActor {
     /// else, or a replay of the same history, costs no requests and can't lose a pin that is still right.
     ///
     /// For each address: an unchanged one is left as it is; a found one is stored; a "no match" is recorded for
-    /// the user to correct; one that couldn't be asked loses its old pin, because the address changed and the
-    /// old pin belongs to a different one.
+    /// the user to correct; one that couldn't be asked is kept for `retryPending()`, and loses its old pin,
+    /// because the address changed and the old pin belongs to a different one.
     func update(with contact: CNContact) async throws(GeocodingError) {
         let answered = await answeredFingerprints(forContactId: contact.identifier)
         let needsLookup = contact.postalAddresses.filter { answered[$0.identifier] != $0.value.fingerprint }
@@ -127,6 +132,53 @@ actor ContactActor {
         }
     }
     
+    /// Looks up again the addresses that couldn't be asked earlier (a provider error, or the host's request limit).
+    /// Returns true if any of them now has an answer. An address whose text changed since is left to the sync,
+    /// which sees the new text. Throws `.offline`, `.rateLimited` or `.cancelled` so the pass can pause.
+    func retryPending() async throws(GeocodingError) -> Bool {
+        let pending = await SkopelosClient.shared.read { context in
+            FailedAddress.SK_all(context).filter(\.needsRetry).map {
+                (contactId: $0.contactId, postalAddressId: $0.postalAddressId, fingerprint: $0.addressFingerprint)
+            }
+        }
+        guard !pending.isEmpty else { return false }
+
+        let contactsById: [String: CNContact]
+        do {
+            contactsById = try loadContacts(Set(pending.map(\.contactId)), contactKeys)
+        } catch {
+            Logger.contacts.error("Contact fetch for retry failed: \(error, privacy: .public)")
+            return false
+        }
+
+        var answeredAny = false
+        for (contactId, rows) in Dictionary(grouping: pending, by: \.contactId) {
+            guard let contact = contactsById[contactId] else {
+                // Deleted, or no longer visible with limited access: nothing left to look up.
+                SkopelosClient.shared.writeSync { context in
+                    for row in FailedAddress.SK_all("contactId", isEqualTo: contactId, sortTerms: "contactId", ascending: false, context: context) where row.needsRetry {
+                        row.SK_remove(context)
+                    }
+                }
+                continue
+            }
+
+            var lookups: [String: Lookup] = [:]
+            for row in rows {
+                guard let address = contact.postalAddresses.first(where: { $0.identifier == row.postalAddressId }),
+                      address.value.fingerprint == row.fingerprint else { continue }
+                lookups[row.postalAddressId] = try await geocode(address.value)
+            }
+            guard !lookups.isEmpty else { continue }
+
+            SkopelosClient.shared.writeSync { context in
+                Self.store(lookups, for: contact, in: context)
+            }
+            if lookups.values.contains(where: { if case .retry = $0 { false } else { true } }) { answeredAny = true }
+        }
+        return answeredAny
+    }
+
     func delete(contactIdentifier: String) {
         SkopelosClient.shared.writeSync { context in
             Self.delete(contactIdentifier: contactIdentifier, in: context)
@@ -134,11 +186,14 @@ actor ContactActor {
     }
 
     /// Postal address identifiers stored for the contact, for tests.
-    func storedAddressIds(forContactId contactId: String) async -> (located: Set<String>, failed: Set<String>) {
+    /// `failed` are the no-match addresses, `pending` the ones waiting for `retryPending()`.
+    func storedAddressIds(forContactId contactId: String) async -> (located: Set<String>, failed: Set<String>, pending: Set<String>) {
         await SkopelosClient.shared.read { context in
             let located = ContactLocation.SK_all("contactId", isEqualTo: contactId, sortTerms: "contactId", ascending: false, context: context)
-            let failed = FailedAddress.SK_all("contactId", isEqualTo: contactId, sortTerms: "contactId", ascending: false, context: context)
-            return (Set(located.map(\.postalAddressId)), Set(failed.map(\.postalAddressId)))
+            let rows = FailedAddress.SK_all("contactId", isEqualTo: contactId, sortTerms: "contactId", ascending: false, context: context)
+            return (Set(located.map(\.postalAddressId)),
+                    Set(rows.filter { !$0.needsRetry }.map(\.postalAddressId)),
+                    Set(rows.filter(\.needsRetry).map(\.postalAddressId)))
         }
     }
 
@@ -165,11 +220,22 @@ actor ContactActor {
     
     // MARK: - Private API
 
+    @Sendable
+    private static func loadFromContactStore(identifiers: Set<String>, keys: ContactKeys) throws -> [String: CNContact] {
+        let fetchRequest = CNContactFetchRequest(keysToFetch: keys.descriptors + [CNContactPostalAddressesKey as CNKeyDescriptor])
+        fetchRequest.predicate = CNContact.predicateForContacts(withIdentifiers: Array(identifiers))
+        var contactsById = [String: CNContact]()
+        try CNContactStore().enumerateContacts(with: fetchRequest) { (contact, stopPointer) in
+            contactsById[contact.identifier] = contact
+        }
+        return contactsById
+    }
+
     private enum Lookup {
         case located(CLLocationCoordinate2D)
         case noMatch
-        /// Not looked up, or the lookup failed. Nothing is known about the address, so it isn't reported.
-        case skipped
+        /// Couldn't be asked: a provider error or the host's request limit. Looked up again by `retryPending()`.
+        case retry
     }
 
     /// Geocodes the given addresses, keyed by postal address identifier.
@@ -183,14 +249,14 @@ actor ContactActor {
     }
 
     /// The fingerprint each of the contact's addresses was last answered for (found or no match), keyed by
-    /// postal address identifier.
+    /// postal address identifier. An address waiting for a retry isn't answered.
     private func answeredFingerprints(forContactId contactId: String) async -> [String: String] {
         await SkopelosClient.shared.read { context in
             var answered: [String: String] = [:]
             for row in ContactLocation.SK_all("contactId", isEqualTo: contactId, sortTerms: "contactId", ascending: false, context: context) {
                 answered[row.postalAddressId] = row.addressFingerprint
             }
-            for row in FailedAddress.SK_all("contactId", isEqualTo: contactId, sortTerms: "contactId", ascending: false, context: context) {
+            for row in FailedAddress.SK_all("contactId", isEqualTo: contactId, sortTerms: "contactId", ascending: false, context: context) where !row.needsRetry {
                 answered[row.postalAddressId] = row.addressFingerprint
             }
             return answered
@@ -215,14 +281,18 @@ actor ContactActor {
         } catch .requestLimitReached {
             // Expected once the host's limit is used up, and every remaining address hits it, so it isn't
             // logged per address. The fetcher logs it once when the pass ends.
-            return .skipped
+            return .retry
+        } catch .invalidRequest {
+            // Every provider rejects the address itself, so it needs correcting, like a no match.
+            Logger.geocoding.notice("Invalid address \(address.addressString, privacy: .private)")
+            return .noMatch
         } catch {
             // A single provider reports a cancelled request as an ordinary failure, so ask the task itself.
-            // Storing "no match" here would lose the address for good once the token moves on.
+            // Treating it as a failure would send the address to a retry that the cancelled sync never needed.
             if Task.isCancelled { throw .cancelled }
             // The address is personal data, so it stays redacted in the unified log.
             Logger.geocoding.error("Geocoding failure for \(address.addressString, privacy: .private): \(error, privacy: .public)")
-            return .skipped
+            return .retry
         }
     }
 
@@ -271,10 +341,15 @@ actor ContactActor {
                 row.contactId = contact.identifier
                 row.postalAddressId = address.identifier
                 row.addressFingerprint = fingerprint
-            case .skipped:
-                // Only addresses that changed are looked up, so a row here is for the old text.
+                row.needsRetry = false
+            case .retry:
+                // Only addresses without a current answer are looked up, so a pin here is for the old text.
                 location?.SK_remove(context)
-                failure?.SK_remove(context)
+                let row = failure ?? FailedAddress.SK_create(context)
+                row.contactId = contact.identifier
+                row.postalAddressId = address.identifier
+                row.addressFingerprint = fingerprint
+                row.needsRetry = true
             }
         }
     }

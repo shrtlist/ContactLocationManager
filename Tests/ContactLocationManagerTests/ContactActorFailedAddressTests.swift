@@ -96,17 +96,31 @@ private struct PickyGeocoder: Geocoder {
         await actor.delete(contactIdentifier: contact.identifier)
     }
 
-    @Test(arguments: [GeocodingError.requestLimitReached, .unavailable, .unauthorized, .invalidRequest])
-    func doesNotRecordAnAddressThatWasNeverAnswered(error: GeocodingError) async throws {
+    /// Not the user's to fix, so it isn't listed. It waits for `retryPending()` instead.
+    @Test(arguments: [GeocodingError.requestLimitReached, .unavailable, .unauthorized])
+    func anAddressThatCouldNotBeAskedWaitsForARetry(error: GeocodingError) async throws {
         let actor = actor(ScriptedGeocoder(.failure(error)))
-        let (contact, _) = self.contact(streets: ["1 Main St"])
+        let (contact, ids) = self.contact(streets: ["1 Main St"])
 
         try await actor.apply(.insert(contact))
 
         let stored = await actor.storedAddressIds(forContactId: contact.identifier)
         #expect(stored.failed.isEmpty)
         #expect(stored.located.isEmpty)
+        #expect(stored.pending == Set(ids))
+        await actor.delete(contactIdentifier: contact.identifier)
+    }
 
+    /// Every provider rejects a malformed address, so it needs correcting, like a no match.
+    @Test func aMalformedAddressIsListedForTheUserToCorrect() async throws {
+        let actor = actor(ScriptedGeocoder(.failure(.invalidRequest)))
+        let (contact, ids) = self.contact(streets: ["1 Main St"])
+
+        try await actor.apply(.insert(contact))
+
+        let stored = await actor.storedAddressIds(forContactId: contact.identifier)
+        #expect(stored.failed == Set(ids))
+        #expect(stored.pending.isEmpty)
         await actor.delete(contactIdentifier: contact.identifier)
     }
 

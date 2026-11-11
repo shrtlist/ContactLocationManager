@@ -147,7 +147,7 @@ actor ContactActor {
         do {
             contactsById = try loadContacts(Set(pending.map(\.contactId)), contactKeys)
         } catch {
-            Logger.contacts.error("Contact fetch for retry failed: \(error, privacy: .public)")
+            Logger.contacts.error("Contact fetch for retry failed: \(logDescription(of: error), privacy: .public)")
             return false
         }
 

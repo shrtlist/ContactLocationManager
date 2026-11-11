@@ -37,6 +37,9 @@ public final class ContactHistoryFetcher {
     /// Cleared by `setMaxRequests(_:)` once the limit is raised.
     public private(set) var hasReachedRequestLimit = false
 
+    /// Why the fetcher couldn't read Contacts the last time it asked for changes, or `nil` if it could.
+    public private(set) var syncError: ContactSyncError?
+
     @ObservationIgnored private let contactActor: ContactActor
     @ObservationIgnored private let limiter: RequestLimitedGeocoder
     @ObservationIgnored private var isFetching = false
@@ -275,15 +278,17 @@ public final class ContactHistoryFetcher {
         do {
             (token, changes) = try await Self.fetchHistory(startingToken: startingToken)
         } catch {
-            let code = (error as? CNError)?.code
-
-            if startingToken != nil, code == .changeHistoryExpired || code == .changeHistoryInvalidAnchor {
-                startOver = true
+            Logger.contacts.error("Contacts history fetch failed: \(logDescription(of: error), privacy: .public)")
+            if startingToken != nil {
+                await contactActor.saveToken(nil)
+                needsAnotherFetch = true
             } else {
+                syncError = .contactsUnreadable(underlying: error)
                 retryWhenActive = true
             }
             return
         }
+        syncError = nil
 
         defer { syncProgress = nil }
 
@@ -352,12 +357,12 @@ public final class ContactHistoryFetcher {
         do {
             contactLocationAnnotations = try await contactActor.fetchAll()
         } catch {
-            Logger.contacts.error("Contact fetch failed: \(error, privacy: .public)")
+            Logger.contacts.error("Contact fetch failed: \(logDescription(of: error), privacy: .public)")
         }
         do {
             ungeocodedAddresses = try await contactActor.fetchFailedAddresses(extraKeys: ContactKeys([CNContactViewController.descriptorForRequiredKeys()]))
         } catch {
-            Logger.contacts.error("Ungeocoded address fetch failed: \(error, privacy: .public)")
+            Logger.contacts.error("Ungeocoded address fetch failed: \(logDescription(of: error), privacy: .public)")
         }
     }
 

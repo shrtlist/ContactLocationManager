@@ -56,6 +56,7 @@ The fetcher doesn't sync by itself. Call `start()` when you're ready to show the
 | `authorizationStatus: CNAuthorizationStatus` | The current Contacts permission. |
 | `syncProgress: Double?` | 0...1 while contacts are being processed, `nil` when idle. Counts contacts, not addresses. |
 | `hasReachedRequestLimit: Bool` | True when addresses were skipped because the request limit was reached. |
+| `syncError: ContactSyncError?` | Why the fetcher couldn't read Contacts the last time it asked for changes (`.contactsUnreadable(underlying:)`), or `nil` if it could. Denied access isn't an error: read `authorizationStatus` for that. |
 
 ### Observing from UIKit
 
@@ -137,10 +138,8 @@ To run it on a device, choose your team under Signing & Capabilities.
 
 ## Known limitations
 
-- **Failures are not retried.** An address that fails to geocode (offline, provider error, no match) is logged to the console and skipped. The sync token has already moved past it, so it is only tried again after `reset()` or a change to that contact.
-- **Syncing starts at creation.** If access is already granted, the fetcher syncs immediately, even with no network connection. Create it once your app knows the network is up if that matters.
+- **Syncing starts at `start()`.** Creating the fetcher only publishes the locations stored by earlier syncs. `start()` syncs right away, even with no network connection (a sync that can't geocode pauses and tries again when the app becomes active). Call it once your app knows the network is up if that matters.
 - **Free users can reach paid providers.** The keys you pass apply to every request. If MapKit finds no match or fails, the address goes to Mapsi and Google, and still counts as one request. To keep a tier on MapKit only, don't pass it keys.
-- **Changing providers needs a new fetcher.** The provider chain is built once, when the fetcher is created.
 - **`reset()` and `setMaxRequests(_:)` can return before they take effect.** If a sync is running, it stops after the contact it is on, and the stored locations are cleared then. Otherwise they return once the new sync has finished.
 - **Limited Contacts access** (`.limited`) is supported in code but has not been tested.
 - **No cache.** Every address is geocoded again after a `reset()`.

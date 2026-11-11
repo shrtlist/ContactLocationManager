@@ -59,7 +59,7 @@ public final class ContactHistoryFetcher {
     /// request limit. If access has already been granted, the locations stored by earlier syncs are
     /// published right away. Otherwise `start()` shows the system prompt, or the host calls `requestAccess()`
     /// to show it earlier.
-    /// Geocoding tries MapKit first, then Mapsi, then Google. A provider without a key is left out,
+    /// Geocoding tries MapKit first, then Google, then Mapsi. A provider without a key is left out,
     /// and MapKit is left out when `includesMapKit` is false, for example to test another provider alone.
     /// `maxRequests` is the total number of addresses that will ever be geocoded, or `nil` for no
     /// limit. Contacts beyond it are skipped and `hasReachedRequestLimit` becomes true.
@@ -77,8 +77,6 @@ public final class ContactHistoryFetcher {
                   contactKeys: contactKeys)
     }
 
-    /// Like `init(mapsiAPIKey:googleAPIKey:includesMapKit:maxRequests:contactKeys:)`, but geocodes with the given
-    /// geocoder instead of the MapKit, Mapsi and Google chain, for example a mock for testing.
     public init(geocoder: any Geocoder,
                 maxRequests: Int? = nil,
                 contactKeys: [any CNKeyDescriptor] = ContactHistoryFetcher.defaultContactKeys) {
@@ -167,13 +165,10 @@ public final class ContactHistoryFetcher {
         contactLocationAnnotations.first(where: { $0.contact == contact && $0.labeledAddress == postalAddress })
     }
 
-    /// Geocodes with the given geocoder from the next address on, including in a sync that is
-    /// running. Locations already stored are kept, and the request count carries over.
     public func setGeocoder(_ geocoder: any Geocoder) async {
         await limiter.setGeocoder(geocoder)
     }
 
-    /// Like `setGeocoder(_:)`, with the MapKit, Mapsi and Google chain the matching init builds.
     public func setGeocoder(mapsiAPIKey: String? = nil,
                             googleAPIKey: String? = nil,
                             includesMapKit: Bool = true) async {

@@ -3,7 +3,7 @@
 A Swift package that turns your users' contacts into map coordinates. It watches the Contacts database, geocodes each postal address, stores the results, and publishes them as an observable array your app can show on a map.
 
 - Syncs incrementally using Contacts change history, so only added, updated and deleted contacts are processed.
-- Geocodes with MapKit first, then Mapsi, then Google if a provider finds no match or fails.
+- Geocodes with MapKit first, then Google, then Mapsi if a provider finds no match or fails.
 - Keeps results in a local Core Data store (via [Skopelos](https://github.com/albertodebortoli/Skopelos)).
 - Exposes plain `@Observable` properties, so UIKit and SwiftUI hosts react to changes the same way.
 - Lets the host cap the number of geocoding requests, for example for a free tier.
@@ -139,7 +139,7 @@ To run it on a device, choose your team under Signing & Capabilities.
 ## Known limitations
 
 - **Syncing starts at `start()`.** Creating the fetcher only publishes the locations stored by earlier syncs. `start()` syncs right away, even with no network connection (a sync that can't geocode pauses and tries again when the app becomes active). Call it once your app knows the network is up if that matters.
-- **Free users can reach paid providers.** The keys you pass apply to every request. If MapKit finds no match or fails, the address goes to Mapsi and Google, and still counts as one request. To keep a tier on MapKit only, don't pass it keys.
+- **Free users can reach paid providers.** The keys you pass apply to every request. If MapKit finds no match or fails, the address goes to Google and Mapsi, and still counts as one request. To keep a tier on MapKit only, don't pass it keys.
 - **`reset()` and `setMaxRequests(_:)` can return before they take effect.** If a sync is running, it stops after the contact it is on, and the stored locations are cleared then. Otherwise they return once the new sync has finished.
 - **Limited Contacts access** (`.limited`) is supported in code but has not been tested.
 - **No cache.** Every address is geocoded again after a `reset()`.

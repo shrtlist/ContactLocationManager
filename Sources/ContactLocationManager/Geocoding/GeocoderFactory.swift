@@ -7,7 +7,7 @@ import Foundation
 import OSLog
 
 enum GeocoderFactory {
-    /// MapKit, then Mapsi, then Google. Providers without a key are left out, so with no
+    /// MapKit, then Google, then Mapsi. Providers without a key are left out, so with no
     /// keys at all the chain is MapKit only. MapKit is left out too when `includesMapKit` is false.
     static func makeDefault(
         mapsiAPIKey: String?,
@@ -17,15 +17,15 @@ enum GeocoderFactory {
     ) -> any Geocoder {
         var providers: [any Geocoder] = includesMapKit ? [MapKitGeocoder()] : []
 
-        if let key = mapsiAPIKey, !key.isEmpty {
-            providers.append(MapsiGeocoder(apiKey: key, session: session))
-        } else {
-            Logger.geocoding.info("No Mapsi API key, skipping Mapsi")
-        }
         if let key = googleAPIKey, !key.isEmpty {
             providers.append(GoogleGeocoder(apiKey: key, session: session))
         } else {
             Logger.geocoding.info("No Google API key, skipping Google")
+        }
+        if let key = mapsiAPIKey, !key.isEmpty {
+            providers.append(MapsiGeocoder(apiKey: key, session: session))
+        } else {
+            Logger.geocoding.info("No Mapsi API key, skipping Mapsi")
         }
 
         return FailoverGeocoder(providers: providers)

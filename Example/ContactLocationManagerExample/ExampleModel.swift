@@ -86,6 +86,9 @@ final class ExampleModel {
     var requestLimit: Int? { limitsRequests ? maxRequests : nil }
 
     func refreshCounts() async {
+        // Reading contacts before the user has been asked would raise the system prompt by itself.
+        let status = CNContactStore.authorizationStatus(for: .contacts)
+        guard status == .authorized || status == .limited else { return }
         guard let counts = await Self.countContactsAndAddresses() else { return }
         contactCount = counts.contacts
         addressCount = counts.addresses

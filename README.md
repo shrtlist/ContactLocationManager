@@ -41,11 +41,11 @@ import ContactLocationManager
 
 let fetcher = ContactHistoryFetcher(mapsiAPIKey: mapsiKey, googleAPIKey: googleKey)
 
-// Show the system prompt when your app is ready for it.
-await fetcher.requestAccess()
+// Asks for Contacts access if needed, then syncs.
+await fetcher.start()
 ```
 
-The fetcher doesn't sync by itself. Call `start()` when you're ready, for example once access is granted and your request limit is known. It syncs now and again on every contact change, so the host doesn't listen for `CNContactStoreDidChange`. A sync that stopped early, for example because the device was offline, tries again by itself when the app next becomes active, and one that stopped because every provider was rate limited tries again after the providers' 60 second cooldown. Addresses that couldn't be looked up because of a provider error or the request limit are remembered too, and looked up again each time the app becomes active. If access has already been granted, the locations stored by earlier syncs are published as soon as it is created.
+The fetcher doesn't sync by itself. Call `start()` when you're ready to show the system prompt and to sync, for example once your request limit is known. If the user hasn't been asked for Contacts access yet, `start()` shows the prompt and waits for the answer before the first sync; to show the prompt earlier, call `requestAccess()`. It syncs now and again on every contact change, so the host doesn't listen for `CNContactStoreDidChange`. A sync that stopped early, for example because the device was offline, tries again by itself when the app next becomes active, and one that stopped because every provider was rate limited tries again after the providers' 60 second cooldown. Addresses that couldn't be looked up because of a provider error or the request limit are remembered too, and looked up again each time the app becomes active. If access has already been granted, the locations stored by earlier syncs are published as soon as it is created.
 
 `ContactHistoryFetcher` is `@MainActor` and `@Observable`. Read these properties and react when they change:
 

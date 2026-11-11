@@ -21,11 +21,6 @@ struct ContentView: View {
             List {
                 Section("Contacts") {
                     LabeledContent("Access", value: description(of: fetcher.authorizationStatus))
-                    if fetcher.authorizationStatus == .notDetermined {
-                        Button("Request Contacts Access") {
-                            Task { await fetcher.requestAccess() }
-                        }
-                    }
                     LabeledContent("Contacts", value: model.contactCount.map(String.init) ?? "–")
                     LabeledContent("Addresses", value: model.addressCount.map(String.init) ?? "–")
                 }

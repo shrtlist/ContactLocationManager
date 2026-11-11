@@ -93,7 +93,6 @@ struct ContentView: View {
                 UngeocodedAddressesView(fetcher: fetcher)
             }
             .task(id: fetcher.authorizationStatus) {
-                guard fetcher.authorizationStatus == .authorized || fetcher.authorizationStatus == .limited else { return }
                 await model.refreshCounts()
             }
             .task {

@@ -44,7 +44,8 @@ public final class ContactHistoryFetcher {
     @ObservationIgnored private var foregroundObservation: Task<Void, Never>?
     /// Waits out a provider's cooldown, then syncs again. At most one is pending.
     @ObservationIgnored private var cooldownRetry: Task<Void, Never>?
-    /// True when the last pass stopped early, so the next time the app becomes active it syncs again.
+    /// True when the last pass stopped early or a sync was skipped for lack of access, so the next time
+    /// the app becomes active it syncs again.
     @ObservationIgnored private var retryWhenActive = false
     @ObservationIgnored private var needsAnotherFetch = false
     /// Addresses that couldn't be asked earlier are looked up again after the next history pass.
@@ -54,7 +55,8 @@ public final class ContactHistoryFetcher {
 
     /// Doesn't sync by itself: the host calls `start()` when it's ready, for example once it knows the
     /// request limit. If access has already been granted, the locations stored by earlier syncs are
-    /// published right away. Otherwise the host calls `requestAccess()` when it's ready to show the system prompt.
+    /// published right away. Otherwise `start()` shows the system prompt, or the host calls `requestAccess()`
+    /// to show it earlier.
     /// Geocoding tries MapKit first, then Mapsi, then Google. A provider without a key is left out,
     /// and MapKit is left out when `includesMapKit` is false, for example to test another provider alone.
     /// `maxRequests` is the total number of addresses that will ever be geocoded, or `nil` for no
@@ -96,15 +98,21 @@ public final class ContactHistoryFetcher {
     }
 
     /// Shows the system permission prompt if the user hasn't been asked yet. Does nothing for any other
-    /// status. It doesn't start a sync: call `fetchChanges()` once access is granted.
+    /// status. `start()` does this itself, so call it only to show the prompt before the host is ready to sync.
+    /// If `start()` has already been called, the sync runs once access is granted.
+    /// Otherwise nothing syncs until the host calls `start()`.
     public func requestAccess() async {
-        guard authorizationStatus == .notDetermined else { return }
-        _ = try? await CNContactStore().requestAccess(for: .contacts)
-        authorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
+        await waitForAccessDecision()
+        await syncIfReady()
     }
 
-    /// Syncs now, and again whenever the contact store changes. Call it once the host is ready, for example
-    /// after `requestAccess()` and once the request limit is set. Calling it again just syncs again.
+    /// Asks for Contacts access if the user hasn't been asked yet, then syncs now, and again whenever the
+    /// contact store changes. Call it once the host is ready to show the system prompt and to sync, for
+    /// example once the request limit is set. Calling it again just syncs again.
+    ///
+    /// It waits for the user's answer before the first sync. If something else in the app already raised
+    /// the prompt, for example another `CNContactStore` reading contacts, it waits for that same answer.
+    /// If access is denied, nothing syncs.
     ///
     /// The fetcher listens for `CNContactStoreDidChange` from here on. The system delivers a change made
     /// while the app was away once the app is active again, so the host needs no foreground handling.
@@ -129,6 +137,7 @@ public final class ContactHistoryFetcher {
                 }
             }
         }
+        await waitForAccessDecision()
         await fetchChanges()
     }
 
@@ -145,7 +154,12 @@ public final class ContactHistoryFetcher {
     public func fetchChanges() async {
         // Access can be granted through another CNContactStore, which this fetcher wouldn't otherwise see.
         authorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
-        guard hasAccess else { return }
+        guard hasAccess else {
+            // Access may be granted later without `requestAccess()`, for example by a prompt another
+            // CNContactStore raised. The app becomes active when that prompt closes, and syncs then.
+            retryWhenActive = true
+            return
+        }
         await requestSync()
     }
 
@@ -194,6 +208,16 @@ public final class ContactHistoryFetcher {
 
     // MARK: - Private API
 
+    /// Returns once the user has answered the system prompt, showing it if nothing else has. Returns at
+    /// once if they were asked before. The answer is read from the authorization status afterwards, which
+    /// says more than the granted flag: it tells limited from full access.
+    private func waitForAccessDecision() async {
+        authorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
+        guard authorizationStatus == .notDetermined else { return }
+        _ = try? await CNContactStore().requestAccess(for: .contacts)
+        authorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
+    }
+
     private var hasAccess: Bool {
         authorizationStatus == .authorized || authorizationStatus == .limited
     }
@@ -201,7 +225,11 @@ public final class ContactHistoryFetcher {
     /// For calls that aren't asking for a sync themselves, so they can't start one before the host is ready.
     private func syncIfReady() async {
         authorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
-        guard isStarted, hasAccess else { return }
+        guard isStarted else { return }
+        guard hasAccess else {
+            retryWhenActive = true
+            return
+        }
         await requestSync()
     }
 

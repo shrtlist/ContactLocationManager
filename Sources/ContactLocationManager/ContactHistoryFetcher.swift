@@ -18,10 +18,8 @@ import Observation
 import OSLog
 import UIKit
 
-/// Create one per process and keep it for the life of the app; change its geocoder with
-/// `setGeocoder` rather than making another. Every fetcher shares the same
-/// store and history token, so two fetchers syncing at once would duplicate geocoding requests and
-/// could wipe each other's locations.
+/// There is one fetcher per process: call `configure(...)` once at launch, then use `shared`.
+/// Change its geocoder and request limit later with `setGeocoder` and `setMaxRequests`.
 @MainActor
 @Observable
 public final class ContactHistoryFetcher {
@@ -55,7 +53,18 @@ public final class ContactHistoryFetcher {
     @ObservationIgnored private var startOver = false
     @ObservationIgnored private var isStarted = false
 
-    /// Doesn't sync by itself: the host calls `start()` when it's ready, for example once it knows the
+    private static var configured: ContactHistoryFetcher?
+
+    /// The one fetcher. Call `configure(...)` first, once, at launch.
+    public static var shared: ContactHistoryFetcher {
+        guard let configured else {
+            preconditionFailure("Call ContactHistoryFetcher.configure(...) once, before using ContactHistoryFetcher.shared")
+        }
+        return configured
+    }
+
+    /// Creates the shared fetcher. Call it once, at launch, before `shared`; a second call is a programmer error.
+    /// It doesn't sync by itself: the host calls `start()` when it's ready, for example once it knows the
     /// request limit. If access has already been granted, the locations stored by earlier syncs are
     /// published right away. Otherwise `start()` shows the system prompt, or the host calls `requestAccess()`
     /// to show it earlier.
@@ -65,21 +74,31 @@ public final class ContactHistoryFetcher {
     /// limit. Contacts beyond it are skipped and `hasReachedRequestLimit` becomes true.
     /// `contactKeys` are the contact properties each annotation's `contact` has loaded, on top of
     /// the postal addresses, which are always loaded. The default is the name, thumbnail and type.
-    public convenience init(mapsiAPIKey: String? = nil,
-                            googleAPIKey: String? = nil,
-                            includesMapKit: Bool = true,
-                            maxRequests: Int? = nil,
-                            contactKeys: [any CNKeyDescriptor] = ContactHistoryFetcher.defaultContactKeys) {
-        self.init(geocoder: GeocoderFactory.makeDefault(mapsiAPIKey: mapsiAPIKey,
+    /// They can only be chosen here.
+    public static func configure(mapsiAPIKey: String? = nil,
+                                 googleAPIKey: String? = nil,
+                                 includesMapKit: Bool = true,
+                                 maxRequests: Int? = nil,
+                                 contactKeys: [any CNKeyDescriptor] = ContactHistoryFetcher.defaultContactKeys) {
+        configure(geocoder: GeocoderFactory.makeDefault(mapsiAPIKey: mapsiAPIKey,
                                                         googleAPIKey: googleAPIKey,
                                                         includesMapKit: includesMapKit),
                   maxRequests: maxRequests,
                   contactKeys: contactKeys)
     }
 
-    public init(geocoder: any Geocoder,
-                maxRequests: Int? = nil,
-                contactKeys: [any CNKeyDescriptor] = ContactHistoryFetcher.defaultContactKeys) {
+    /// Like `configure(mapsiAPIKey:...)`, with your own geocoder, for example a mock.
+    public static func configure(geocoder: any Geocoder,
+                                 maxRequests: Int? = nil,
+                                 contactKeys: [any CNKeyDescriptor] = ContactHistoryFetcher.defaultContactKeys) {
+        precondition(configured == nil, "ContactHistoryFetcher.configure(...) must be called only once")
+        configured = ContactHistoryFetcher(geocoder: geocoder, maxRequests: maxRequests, contactKeys: contactKeys)
+    }
+
+    /// Internal so tests can build their own fetchers; hosts use `configure(...)` and `shared`.
+    init(geocoder: any Geocoder,
+         maxRequests: Int? = nil,
+         contactKeys: [any CNKeyDescriptor] = ContactHistoryFetcher.defaultContactKeys) {
         limiter = RequestLimitedGeocoder(geocoder: geocoder, maxRequests: maxRequests)
         let keys = ContactKeys(contactKeys + [CNContactPostalAddressesKey as CNKeyDescriptor])
         contactActor = ContactActor(geocoder: limiter, contactKeys: keys)

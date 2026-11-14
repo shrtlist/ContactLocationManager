@@ -39,13 +39,16 @@ then add the `ContactLocationManager` product to your target.
 ```swift
 import ContactLocationManager
 
-let fetcher = ContactHistoryFetcher(mapsiAPIKey: mapsiKey, googleAPIKey: googleKey)
+// Once, at launch.
+ContactHistoryFetcher.configure(mapsiAPIKey: mapsiKey, googleAPIKey: googleKey)
 
 // Asks for Contacts access if needed, then syncs.
-await fetcher.start()
+await ContactHistoryFetcher.shared.start()
 ```
 
-The fetcher doesn't sync by itself. Call `start()` when you're ready to show the system prompt and to sync, for example once your request limit is known. If the user hasn't been asked for Contacts access yet, `start()` shows the prompt and waits for the answer before the first sync; to show the prompt earlier, call `requestAccess()`. It syncs now and again on every contact change, so the host doesn't listen for `CNContactStoreDidChange`. A sync that stopped early, for example because the device was offline, tries again by itself when the app next becomes active, and one that stopped because every provider was rate limited tries again after the providers' 60 second cooldown. Addresses that couldn't be looked up because of a provider error or the request limit are remembered too, and looked up again each time the app becomes active. If access has already been granted, the locations stored by earlier syncs are published as soon as it is created.
+There is one fetcher per process. `configure(...)` creates it, and calling it twice, or reading `shared` before it, is a programmer error. `ContactHistoryFetcher` has no public initialiser, so two fetchers can't sync at once. The snippets below write `fetcher` for `ContactHistoryFetcher.shared`.
+
+The fetcher doesn't sync by itself. Call `start()` when you're ready to show the system prompt and to sync, for example once your request limit is known. If the user hasn't been asked for Contacts access yet, `start()` shows the prompt and waits for the answer before the first sync; to show the prompt earlier, call `requestAccess()`. It syncs now and again on every contact change, so the host doesn't listen for `CNContactStoreDidChange`. A sync that stopped early, for example because the device was offline, tries again by itself when the app next becomes active, and one that stopped because every provider was rate limited tries again after the providers' 60 second cooldown. Addresses that couldn't be looked up because of a provider error or the request limit are remembered too, and looked up again each time the app becomes active. If access has already been granted, the locations stored by earlier syncs are published as soon as `configure(...)` has run.
 
 `ContactHistoryFetcher` is `@MainActor` and `@Observable`. Read these properties and react when they change:
 
@@ -82,7 +85,7 @@ On iOS 26, UIKit also tracks properties you read inside `updateProperties()` aut
 Pass `maxRequests` to cap how many addresses the package will ever geocode:
 
 ```swift
-let fetcher = ContactHistoryFetcher(
+ContactHistoryFetcher.configure(
     mapsiAPIKey: mapsiKey,
     googleAPIKey: googleKey,
     maxRequests: isSubscribed ? nil : 20
@@ -108,10 +111,10 @@ let coordinate = try await geocoder.coordinate(for: postalAddress)  // nil if no
 
 `coordinate(for:)` throws a `GeocodingError` (`rateLimited`, `requestLimitReached`, `unavailable`, `unauthorized`, `invalidRequest` or `cancelled`), declared as typed throws. `FailoverGeocoder` fails over on every error except `invalidRequest`, and skips a provider for 60 seconds after it reports `rateLimited`.
 
-To make the fetcher use your own geocoder, for example a mock in tests, pass anything that conforms to `Geocoder` instead of keys:
+To make the fetcher use your own geocoder, for example a mock in tests, pass anything that conforms to `Geocoder` to `configure` instead of keys:
 
 ```swift
-let fetcher = ContactHistoryFetcher(geocoder: MyGeocoder(), maxRequests: 20)
+ContactHistoryFetcher.configure(geocoder: MyGeocoder(), maxRequests: 20)
 ```
 
 ## How it works
@@ -138,7 +141,7 @@ To run it on a device, choose your team under Signing & Capabilities.
 
 ## Known limitations
 
-- **Syncing starts at `start()`.** Creating the fetcher only publishes the locations stored by earlier syncs. `start()` syncs right away, even with no network connection (a sync that can't geocode pauses and tries again when the app becomes active). Call it once your app knows the network is up if that matters.
+- **Syncing starts at `start()`.** Calling `configure(...)` only publishes the locations stored by earlier syncs. `start()` syncs right away, even with no network connection (a sync that can't geocode pauses and tries again when the app becomes active). Call it once your app knows the network is up if that matters.
 - **Free users can reach paid providers.** The keys you pass apply to every request. If MapKit finds no match or fails, the address goes to Google and Mapsi, and still counts as one request. To keep a tier on MapKit only, don't pass it keys.
 - **`reset()` and `setMaxRequests(_:)` can return before they take effect.** If a sync is running, it stops after the contact it is on, and the stored locations are cleared then. Otherwise they return once the new sync has finished.
 - **Limited Contacts access** (`.limited`) is supported in code but has not been tested.

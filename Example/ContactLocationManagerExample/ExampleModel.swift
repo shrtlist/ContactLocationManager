@@ -43,9 +43,34 @@ final class ExampleModel {
     private(set) var contactCount: Int?
     private(set) var addressCount: Int?
 
+    /// Creates the shared fetcher from the saved settings. Called once, at launch, before `ExampleModel()`.
+    static func configureFetcher() {
+        let defaults = UserDefaults.standard
+        registerDefaults()
+        let usesMapsi = defaults.bool(forKey: "usesMapsi")
+        let usesGoogle = defaults.bool(forKey: "usesGoogle")
+        let activeMapsiKey = usesMapsi ? key("MapsiAPIKey") : nil
+        let activeGoogleKey = usesGoogle ? key("GoogleMapsAPIKey") : nil
+        let maxRequests = defaults.bool(forKey: "limitsRequests") ? defaults.integer(forKey: "maxRequests") : nil
+        if defaults.bool(forKey: "usesMockGeocoder") {
+            ContactHistoryFetcher.configure(geocoder: MockGeocoder(), maxRequests: maxRequests)
+        } else {
+            ContactHistoryFetcher.configure(mapsiAPIKey: activeMapsiKey, googleAPIKey: activeGoogleKey,
+                                            includesMapKit: defaults.bool(forKey: "usesMapKit")
+                                                || !hasProviderBesidesMapKit(mapsiAPIKey: activeMapsiKey,
+                                                                             googleAPIKey: activeGoogleKey),
+                                            maxRequests: maxRequests)
+        }
+    }
+
+    private static func registerDefaults() {
+        UserDefaults.standard.register(defaults: ["usesMapKit": true, "usesMapsi": true, "usesGoogle": true, "maxRequests": 20])
+    }
+
+    /// `configureFetcher()` must have run first.
     init() {
         let defaults = UserDefaults.standard
-        defaults.register(defaults: ["usesMapKit": true, "usesMapsi": true, "usesGoogle": true, "maxRequests": 20])
+        Self.registerDefaults()
         let usesMockGeocoder = defaults.bool(forKey: "usesMockGeocoder")
         let usesMapKit = defaults.bool(forKey: "usesMapKit")
         let usesMapsi = defaults.bool(forKey: "usesMapsi")
@@ -54,14 +79,7 @@ final class ExampleModel {
         let maxRequests = defaults.integer(forKey: "maxRequests")
         let mapsiAPIKey = Self.key("MapsiAPIKey")
         let googleAPIKey = Self.key("GoogleMapsAPIKey")
-        let activeMapsiKey = usesMapsi ? mapsiAPIKey : nil
-        let activeGoogleKey = usesGoogle ? googleAPIKey : nil
-        fetcher = Self.makeFetcher(usesMockGeocoder: usesMockGeocoder,
-                                   includesMapKit: usesMapKit || !Self.hasProviderBesidesMapKit(mapsiAPIKey: activeMapsiKey,
-                                                                                               googleAPIKey: activeGoogleKey),
-                                   mapsiAPIKey: activeMapsiKey,
-                                   googleAPIKey: activeGoogleKey,
-                                   maxRequests: limitsRequests ? maxRequests : nil)
+        fetcher = .shared
         self.usesMockGeocoder = usesMockGeocoder
         self.usesMapKit = usesMapKit
         self.usesMapsi = usesMapsi
@@ -109,15 +127,6 @@ final class ExampleModel {
 
     private static func hasProviderBesidesMapKit(mapsiAPIKey: String?, googleAPIKey: String?) -> Bool {
         mapsiAPIKey != nil || googleAPIKey != nil
-    }
-
-    private static func makeFetcher(usesMockGeocoder: Bool, includesMapKit: Bool, mapsiAPIKey: String?,
-                                    googleAPIKey: String?, maxRequests: Int?) -> ContactHistoryFetcher {
-        if usesMockGeocoder {
-            return ContactHistoryFetcher(geocoder: MockGeocoder(), maxRequests: maxRequests)
-        }
-        return ContactHistoryFetcher(mapsiAPIKey: mapsiAPIKey, googleAPIKey: googleAPIKey,
-                                      includesMapKit: includesMapKit, maxRequests: maxRequests)
     }
 
     private func applyRequestLimit() {

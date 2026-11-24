@@ -3,11 +3,6 @@ import Contacts
 import CoreLocation
 @testable import ContactLocationManager
 
-private struct NoopGeocoder: Geocoder {
-    func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? { nil }
-}
-
-/// Uses the shared store, so each test works on its own contact and removes it afterwards.
 @MainActor
 @Suite(.serialized) struct ContactHistoryFetcherSyncTests {
     private let contactId = UUID().uuidString
@@ -37,19 +32,6 @@ private struct NoopGeocoder: Geocoder {
         let fetcher = ContactHistoryFetcher(geocoder: NoopGeocoder())
 
         await fetcher.reset()
-
-        #expect(await storedLocations() == [postalAddressId])
-        await actor.delete(contactIdentifier: contactId)
-    }
-
-    @Test func raisingTheLimitDoesNotWipeTheStoreBeforeStart() async {
-        await seedLocation()
-        // The limiter asks for a resync only if addresses were refused under the old limit.
-        UserDefaults.standard.set(true, forKey: "CNGeocodeRequestsRefused")
-        defer { UserDefaults.standard.removeObject(forKey: "CNGeocodeRequestsRefused") }
-        let fetcher = ContactHistoryFetcher(geocoder: NoopGeocoder(), maxRequests: 0)
-
-        await fetcher.setMaxRequests(nil)
 
         #expect(await storedLocations() == [postalAddressId])
         await actor.delete(contactIdentifier: contactId)

@@ -3,11 +3,6 @@ import Contacts
 import CoreLocation
 @testable import ContactLocationManager
 
-/// Never called: these tests seed annotations directly instead of syncing the contact store.
-private struct NoopGeocoder: Geocoder {
-    func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? { nil }
-}
-
 @MainActor
 @Suite struct ContactHistoryFetcherFetchByTests {
     private let ada: CNContact

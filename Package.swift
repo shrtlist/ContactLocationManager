@@ -16,7 +16,7 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/albertodebortoli/Skopelos.git", branch: "master"),
+        .package(url: "https://github.com/albertodebortoli/Skopelos.git", from: "2.4.3"),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.

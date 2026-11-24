@@ -6,8 +6,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/albertodebortoli/Skopelos.git",
       "state" : {
-        "branch" : "master",
-        "revision" : "3d321b43e5091815755ffadae48b840e65fc3197"
+        "revision" : "3d321b43e5091815755ffadae48b840e65fc3197",
+        "version" : "2.4.3"
       }
     }
   ],

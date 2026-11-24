@@ -184,7 +184,6 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 6YCWDV2B6A;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSContactsUsageDescription = "Shows where your contacts' addresses are, to test ContactLocationManager.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -207,7 +206,6 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 6YCWDV2B6A;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSContactsUsageDescription = "Shows where your contacts' addresses are, to test ContactLocationManager.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

@@ -11,7 +11,7 @@
 
 import CoreData
 @preconcurrency import Contacts
-import MapKit
+import CoreLocation
 import OSLog
 
 /// A single change reported by the contact store's change history.
@@ -169,26 +169,6 @@ actor ContactActor {
     func delete(contactIdentifier: String) {
         SkopelosClient.shared.writeSync { context in
             Self.delete(contactIdentifier: contactIdentifier, in: context)
-        }
-    }
-
-    /// Postal address identifiers stored for the contact, for tests.
-    /// `failed` are the no-match addresses, `pending` the ones waiting for `retryPending()`.
-    func storedAddressIds(forContactId contactId: String) async -> (located: Set<String>, failed: Set<String>, pending: Set<String>) {
-        await SkopelosClient.shared.read { context in
-            let located = ContactLocation.SK_all("contactId", isEqualTo: contactId, sortTerms: "contactId", ascending: false, context: context)
-            let rows = FailedAddress.SK_all("contactId", isEqualTo: contactId, sortTerms: "contactId", ascending: false, context: context)
-            return (Set(located.map(\.postalAddressId)),
-                    Set(rows.filter { !$0.needsRetry }.map(\.postalAddressId)),
-                    Set(rows.filter(\.needsRetry).map(\.postalAddressId)))
-        }
-    }
-
-    /// Latitude stored for each postal address of the contact, for tests.
-    func storedLatitudes(forContactId contactId: String) async -> [String: Double] {
-        await SkopelosClient.shared.read { context in
-            let rows = ContactLocation.SK_all("contactId", isEqualTo: contactId, sortTerms: "contactId", ascending: false, context: context)
-            return Dictionary(uniqueKeysWithValues: rows.map { ($0.postalAddressId, $0.latitude) })
         }
     }
 

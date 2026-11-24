@@ -93,9 +93,11 @@ public final class ContactHistoryFetcher {
          maxRequests: Int? = nil,
          contactKeys: [any CNKeyDescriptor] = ContactHistoryFetcher.defaultContactKeys) {
         limiter = RequestLimitedGeocoder(geocoder: geocoder, maxRequests: maxRequests)
-        let keys = ContactKeys(contactKeys + [CNContactPostalAddressesKey as CNKeyDescriptor])
-        contactActor = ContactActor(geocoder: limiter, contactKeys: keys)
+
+        contactActor = ContactActor(geocoder: limiter, contactKeys: ContactKeys(contactKeys))
+
         authorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
+
         if hasAccess {
             Task { await loadContactLocationAnnotations() }
         }

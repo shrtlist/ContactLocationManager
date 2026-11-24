@@ -3,21 +3,6 @@ import Contacts
 import CoreLocation
 @testable import ContactLocationManager
 
-/// Answers from a script, so one test can look an address up twice with different results.
-private final class ScriptedGeocoder: Geocoder, @unchecked Sendable {
-    enum Answer { case coordinate, noMatch, failure(GeocodingError) }
-    var answer: Answer
-    init(_ answer: Answer) { self.answer = answer }
-
-    func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
-        switch answer {
-        case .coordinate: CLLocationCoordinate2D(latitude: 1, longitude: 2)
-        case .noMatch: nil
-        case .failure(let error): throw error
-        }
-    }
-}
-
 /// The geocoder says "no match" for streets that start with "Bad", and finds everything else.
 private struct PickyGeocoder: Geocoder {
     func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
@@ -28,25 +13,8 @@ private struct PickyGeocoder: Geocoder {
 /// Uses the shared store, so each test works on its own contact and removes it afterwards.
 @Suite(.serialized) struct ContactActorFailedAddressTests {
     private func contact(streets: [String]) -> (CNContact, [String]) {
-        let contact = CNMutableContact()
-        contact.givenName = "Ada"
-        contact.postalAddresses = streets.map { street in
-            let address = CNMutablePostalAddress()
-            address.street = street
-            return CNLabeledValue(label: CNLabelHome, value: address as CNPostalAddress)
-        }
+        let contact = makeContact(streets: streets)
         return (contact, contact.postalAddresses.map(\.identifier))
-    }
-
-    /// The same contact and address identifiers with other street text, as after the user edits the address.
-    private func edited(_ contact: CNContact, street: String) -> CNContact {
-        let copy = contact.mutableCopy() as! CNMutableContact
-        copy.postalAddresses = contact.postalAddresses.map { labeled in
-            let address = labeled.value.mutableCopy() as! CNMutablePostalAddress
-            address.street = street
-            return labeled.settingValue(address as CNPostalAddress)
-        }
-        return copy
     }
 
     private func actor(_ geocoder: any Geocoder) -> ContactActor {
@@ -67,7 +35,7 @@ private struct PickyGeocoder: Geocoder {
     }
 
     @Test func storesALocationAndNoFailureWhenTheAddressMatches() async throws {
-        let actor = actor(ScriptedGeocoder(.coordinate))
+        let actor = actor(ScriptedGeocoder(.latitude(1)))
         let (contact, ids) = self.contact(streets: ["1 Main St"])
 
         try await actor.apply(.insert(contact))
@@ -86,8 +54,8 @@ private struct PickyGeocoder: Geocoder {
         let (contact, ids) = self.contact(streets: ["Bad St"])
         try await actor.apply(.insert(contact))
 
-        geocoder.answer = .coordinate
-        try await actor.apply(.update(edited(contact, street: "1 Main St")))
+        geocoder.answer = .latitude(1)
+        try await actor.apply(.update(edited(contact, streets: [0: "1 Main St"])))
 
         let stored = await actor.storedAddressIds(forContactId: contact.identifier)
         #expect(stored.failed.isEmpty)
@@ -133,7 +101,7 @@ private struct PickyGeocoder: Geocoder {
 
         geocoder.answer = .failure(error)
         // Edited, so the address is looked up again; an unchanged one wouldn't be asked.
-        await #expect(throws: error) { try await actor.apply(.update(edited(contact, street: "Bad Rd"))) }
+        await #expect(throws: error) { try await actor.apply(.update(edited(contact, streets: [0: "Bad Rd"]))) }
 
         let stored = await actor.storedAddressIds(forContactId: contact.identifier)
         #expect(stored.failed == Set(ids))

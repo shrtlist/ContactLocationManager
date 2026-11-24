@@ -34,7 +34,7 @@ public final class ContactHistoryFetcher {
     public private(set) var hasReachedRequestLimit = false
 
     /// Why the last sync stopped: Contacts couldn't be read, or the geocoding providers kept refusing
-    /// requests. `nil` once a sync reads Contacts again.
+    /// requests. `nil` again once a later sync gets through.
     public private(set) var syncError: ContactSyncError?
 
     @ObservationIgnored private let contactActor: ContactActor
@@ -263,8 +263,13 @@ public final class ContactHistoryFetcher {
         isFetching = true
         defer { isFetching = false }
 
-        // The last sync gave up on a rate limit: this one asks the providers again at once.
-        if case .rateLimited = syncError { await limiter.cancelCooldowns() }
+        // The last sync gave up on a rate limit: this one asks the providers again at once, and runs
+        // both passes, so the error is only cleared once everything it left behind got through.
+        if case .rateLimited = syncError {
+            await limiter.cancelCooldowns()
+            needsAnotherFetch = true
+            needsRetryPass = true
+        }
 
         while startOver || needsAnotherFetch || needsRetryPass {
             if startOver {
@@ -307,7 +312,7 @@ public final class ContactHistoryFetcher {
             }
             return
         }
-        syncError = nil
+        if case .contactsUnreadable = syncError { syncError = nil }
 
         defer { syncProgress = nil }
 
@@ -353,6 +358,7 @@ public final class ContactHistoryFetcher {
             return
         }
         hasReachedRequestLimit = await limiter.hasRefusedRequests
+        if case .rateLimited = syncError { syncError = nil }
     }
 
     /// Drops the passes still queued: they would only wait out another cooldown. The next activation syncs again.

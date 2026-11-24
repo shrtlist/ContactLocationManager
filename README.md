@@ -59,7 +59,7 @@ The fetcher doesn't sync by itself. Call `start(maxRequests:)` when you're ready
 | `authorizationStatus: CNAuthorizationStatus` | The current Contacts permission. |
 | `syncProgress: Double?` | 0...1 while contacts are being processed, `nil` when idle. Counts contacts, not addresses. |
 | `hasReachedRequestLimit: Bool` | True when addresses were skipped because the request limit was reached. |
-| `syncError: ContactSyncError?` | Why the last sync stopped: Contacts couldn't be read (`.contactsUnreadable(underlying:)`), or the geocoding providers kept refusing requests as too frequent (`.rateLimited`). `nil` once a sync reads Contacts again. Show a message for it if you like; the fetcher tries again by itself when the app next becomes active. Denied access isn't an error: read `authorizationStatus` for that. |
+| `syncError: ContactSyncError?` | Why the last sync stopped: Contacts couldn't be read (`.contactsUnreadable(underlying:)`), or the geocoding providers kept refusing requests as too frequent (`.rateLimited`). `nil` again once a later sync gets through. Show a message for it if you like; the fetcher tries again by itself when the app next becomes active. Denied access isn't an error: read `authorizationStatus` for that. |
 
 ### Observing from UIKit
 

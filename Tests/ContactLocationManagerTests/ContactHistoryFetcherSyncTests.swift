@@ -3,11 +3,6 @@ import Contacts
 import CoreLocation
 @testable import ContactLocationManager
 
-private struct NoopGeocoder: Geocoder {
-    func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? { nil }
-}
-
-/// Uses the shared store, so each test works on its own contact and removes it afterwards.
 @MainActor
 @Suite(.serialized) struct ContactHistoryFetcherSyncTests {
     private let contactId = UUID().uuidString

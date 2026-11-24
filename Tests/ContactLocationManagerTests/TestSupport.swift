@@ -1,4 +1,6 @@
-import Foundation
+import Contacts
+import CoreLocation
+import Synchronization
 @testable import ContactLocationManager
 
 extension ContactActor {
@@ -21,4 +23,58 @@ extension ContactActor {
             return Dictionary(uniqueKeysWithValues: rows.map { ($0.postalAddressId, $0.latitude) })
         }
     }
+}
+
+/// Answers from a script and counts the lookups, so a test can change the answer between lookups
+/// and tell whether an address was asked about.
+final class ScriptedGeocoder: Geocoder {
+    enum Answer { case latitude(Double), noMatch, failure(GeocodingError) }
+    private let state: Mutex<(answer: Answer, calls: Int)>
+
+    init(_ answer: Answer) { state = Mutex((answer, 0)) }
+
+    var calls: Int { state.withLock { $0.calls } }
+    var answer: Answer {
+        get { state.withLock { $0.answer } }
+        set { state.withLock { $0.answer = newValue } }
+    }
+
+    func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
+        let answer = state.withLock { state -> Answer in state.calls += 1; return state.answer }
+        switch answer {
+        case .latitude(let value): return CLLocationCoordinate2D(latitude: value, longitude: value)
+        case .noMatch: return nil
+        case .failure(let error): throw error
+        }
+    }
+}
+
+/// Finds nothing. For tests that never geocode.
+struct NoopGeocoder: Geocoder {
+    func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? { nil }
+}
+
+/// A contact with one home address per street.
+func makeContact(streets: [String]) -> CNContact {
+    let contact = CNMutableContact()
+    contact.givenName = "Ada"
+    contact.postalAddresses = streets.map { street in
+        let address = CNMutablePostalAddress()
+        address.street = street
+        return CNLabeledValue(label: CNLabelHome, value: address as CNPostalAddress)
+    }
+    return contact
+}
+
+/// The same contact and address identifiers, with new street text for the addresses at the given
+/// positions, as after the user edits them.
+func edited(_ contact: CNContact, streets: [Int: String]) -> CNContact {
+    let copy = contact.mutableCopy() as! CNMutableContact
+    copy.postalAddresses = contact.postalAddresses.enumerated().map { index, labeled in
+        guard let street = streets[index] else { return labeled }
+        let address = labeled.value.mutableCopy() as! CNMutablePostalAddress
+        address.street = street
+        return labeled.settingValue(address as CNPostalAddress)
+    }
+    return copy
 }

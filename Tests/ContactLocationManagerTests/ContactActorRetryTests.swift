@@ -1,30 +1,7 @@
 import Testing
 import Contacts
 import CoreLocation
-import Synchronization
 @testable import ContactLocationManager
-
-private final class ScriptedGeocoder: Geocoder, @unchecked Sendable {
-    enum Answer { case latitude(Double), noMatch, failure(GeocodingError) }
-    private let state = Mutex<(answer: Answer, calls: Int)>((.latitude(1), 0))
-
-    init(_ answer: Answer) { state.withLock { $0.answer = answer } }
-
-    var calls: Int { state.withLock { $0.calls } }
-    var answer: Answer {
-        get { state.withLock { $0.answer } }
-        set { state.withLock { $0.answer = newValue } }
-    }
-
-    func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
-        let answer = state.withLock { state -> Answer in state.calls += 1; return state.answer }
-        switch answer {
-        case .latitude(let value): return CLLocationCoordinate2D(latitude: value, longitude: value)
-        case .noMatch: return nil
-        case .failure(let error): throw error
-        }
-    }
-}
 
 /// The contacts the actor's retry pass can find, standing in for the contact store.
 private final class ContactBook: @unchecked Sendable {
@@ -46,25 +23,6 @@ private final class ContactBook: @unchecked Sendable {
 @Suite(.serialized) struct ContactActorRetryTests {
     private let book = ContactBook()
 
-    private func contact(street: String = "1 Main St") -> CNContact {
-        let contact = CNMutableContact()
-        contact.givenName = "Ada"
-        let address = CNMutablePostalAddress()
-        address.street = street
-        contact.postalAddresses = [CNLabeledValue(label: CNLabelHome, value: address as CNPostalAddress)]
-        return contact
-    }
-
-    private func edited(_ contact: CNContact, street: String) -> CNContact {
-        let copy = contact.mutableCopy() as! CNMutableContact
-        copy.postalAddresses = contact.postalAddresses.map { labeled in
-            let address = labeled.value.mutableCopy() as! CNMutablePostalAddress
-            address.street = street
-            return labeled.settingValue(address as CNPostalAddress)
-        }
-        return copy
-    }
-
     private func actor(_ geocoder: any Geocoder) -> ContactActor {
         let book = book
         return ContactActor(geocoder: geocoder, contactKeys: ContactKeys([]), loadContacts: { ids, _ in book.find(ids) })
@@ -72,7 +30,7 @@ private final class ContactBook: @unchecked Sendable {
 
     /// A contact whose first lookup failed with `error`, so it is waiting for a retry.
     private func pendingContact(_ geocoder: ScriptedGeocoder, _ actor: ContactActor, failingWith error: GeocodingError) async throws -> CNContact {
-        let contact = contact()
+        let contact = makeContact(streets: ["1 Main St"])
         book.set(contact, id: contact.identifier)
         geocoder.answer = .failure(error)
         try await actor.apply(.insert(contact))
@@ -143,7 +101,7 @@ private final class ContactBook: @unchecked Sendable {
         let geocoder = ScriptedGeocoder(.latitude(1))
         let actor = actor(geocoder)
         let contact = try await pendingContact(geocoder, actor, failingWith: .unavailable)
-        book.set(edited(contact, street: "2 Main St"), id: contact.identifier)
+        book.set(edited(contact, streets: [0: "2 Main St"]), id: contact.identifier)
         let callsBefore = geocoder.calls
 
         geocoder.answer = .latitude(8)

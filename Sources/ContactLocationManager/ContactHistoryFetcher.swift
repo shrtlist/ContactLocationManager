@@ -167,8 +167,7 @@ public final class ContactHistoryFetcher {
     }
 
     /// Asks Contacts for the changes since the last sync and applies them. Does nothing until
-    /// access has been granted. `start()` already does this on every contact change; call it directly
-    /// only to sync at another moment.
+    /// access has been granted. `start(maxRequests:)` already does this on every contact change.
     ///
     /// If the network goes down mid-sync, the sync stops without saving the history token, so the next
     /// sync reads the same changes again. A sync that stopped early, for example offline, tries again by itself
@@ -176,7 +175,7 @@ public final class ContactHistoryFetcher {
     /// again when the providers' cooldown is over. Both need `start()` to have been called.
     /// Calls that overlap are folded together: a call made during a sync returns at once, and the
     /// running sync reads the changes again straight afterwards.
-    public func fetchChanges() async {
+    func fetchChanges() async {
         // Access can be granted through another CNContactStore, which this fetcher wouldn't otherwise see.
         authorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
         guard hasAccess else { return }

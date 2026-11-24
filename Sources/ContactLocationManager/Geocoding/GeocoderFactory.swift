@@ -20,12 +20,12 @@ enum GeocoderFactory {
         if let key = googleAPIKey, !key.isEmpty {
             providers.append(GoogleGeocoder(apiKey: key, session: session))
         } else {
-            Logger.geocoding.info("No Google API key, skipping Google")
+            Logger.geocoding.info("Google not configured (no API key passed), skipping Google")
         }
         if let key = mapsiAPIKey, !key.isEmpty {
             providers.append(MapsiGeocoder(apiKey: key, session: session))
         } else {
-            Logger.geocoding.info("No Mapsi API key, skipping Mapsi")
+            Logger.geocoding.info("Mapsi not configured (no API key passed), skipping Mapsi")
         }
 
         return FailoverGeocoder(providers: providers)

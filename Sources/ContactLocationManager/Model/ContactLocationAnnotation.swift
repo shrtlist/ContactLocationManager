@@ -25,7 +25,7 @@ public final class ContactLocationAnnotation: NSObject, MKAnnotation, @unchecked
     private let latitude: CLLocationDegrees
     private let longitude: CLLocationDegrees
 
-    public init(contact: CNContact, labeledAddress: CNLabeledValue<CNPostalAddress>, latitude: CLLocationDegrees, longitude: CLLocationDegrees) {
+    init(contact: CNContact, labeledAddress: CNLabeledValue<CNPostalAddress>, latitude: CLLocationDegrees, longitude: CLLocationDegrees) {
         self.contact = contact
         self.labeledAddress = labeledAddress
         self.latitude = latitude

@@ -7,11 +7,11 @@
 import CoreLocation
 
 /// https://mapsi.dev/docs
-public struct MapsiGeocoder: Geocoder {
+struct MapsiGeocoder: Geocoder {
     let apiKey: String
     let session: URLSession
 
-    public init(apiKey: String, session: URLSession = .shared) {
+    init(apiKey: String, session: URLSession = .shared) {
         self.apiKey = apiKey
         self.session = session
     }
@@ -24,7 +24,7 @@ public struct MapsiGeocoder: Geocoder {
         let results: [Result]
     }
 
-    public func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
+    func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
         let endpoint = URL(string: "https://mapsi.dev/v1/geocode")!
         let url = endpoint.appending(queryItems: [
             URLQueryItem(name: "q", value: postalAddress.addressString),

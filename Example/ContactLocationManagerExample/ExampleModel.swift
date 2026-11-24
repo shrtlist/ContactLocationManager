@@ -51,15 +51,13 @@ final class ExampleModel {
         let usesGoogle = defaults.bool(forKey: "usesGoogle")
         let activeMapsiKey = usesMapsi ? key("MapsiAPIKey") : nil
         let activeGoogleKey = usesGoogle ? key("GoogleMapsAPIKey") : nil
-        let maxRequests = defaults.bool(forKey: "limitsRequests") ? defaults.integer(forKey: "maxRequests") : nil
         if defaults.bool(forKey: "usesMockGeocoder") {
-            ContactHistoryFetcher.configure(geocoder: MockGeocoder(), maxRequests: maxRequests)
+            ContactHistoryFetcher.configure(geocoder: MockGeocoder())
         } else {
             ContactHistoryFetcher.configure(mapsiAPIKey: activeMapsiKey, googleAPIKey: activeGoogleKey,
                                             includesMapKit: defaults.bool(forKey: "usesMapKit")
                                                 || !hasProviderBesidesMapKit(mapsiAPIKey: activeMapsiKey,
-                                                                             googleAPIKey: activeGoogleKey),
-                                            maxRequests: maxRequests)
+                                                                             googleAPIKey: activeGoogleKey))
         }
     }
 

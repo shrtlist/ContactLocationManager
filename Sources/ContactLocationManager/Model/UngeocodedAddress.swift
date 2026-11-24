@@ -21,7 +21,7 @@ public final class UngeocodedAddress: NSObject, Identifiable, @unchecked Sendabl
 
     public var id: String { contact.identifier + "/" + labeledAddress.identifier }
 
-    public init(contact: CNContact, labeledAddress: CNLabeledValue<CNPostalAddress>) {
+    init(contact: CNContact, labeledAddress: CNLabeledValue<CNPostalAddress>) {
         self.contact = contact
         self.labeledAddress = labeledAddress
         title = contact.formattedName

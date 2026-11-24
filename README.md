@@ -43,12 +43,12 @@ import ContactLocationManager
 ContactHistoryFetcher.configure(mapsiAPIKey: mapsiKey, googleAPIKey: googleKey)
 
 // Asks for Contacts access if needed, then syncs.
-await ContactHistoryFetcher.shared.start()
+await ContactHistoryFetcher.shared.start(maxRequests: isSubscribed ? nil : 20)
 ```
 
 There is one fetcher per process. `configure(...)` creates it, and calling it twice, or reading `shared` before it, is a programmer error. `ContactHistoryFetcher` has no public initialiser, so two fetchers can't sync at once. The snippets below write `fetcher` for `ContactHistoryFetcher.shared`.
 
-The fetcher doesn't sync by itself. Call `start()` when you're ready to show the system prompt and to sync, for example once your request limit is known. If the user hasn't been asked for Contacts access yet, `start()` shows the prompt and waits for the answer before the first sync; to show the prompt earlier, call `requestAccess()`. It syncs now and again on every contact change, so the host doesn't listen for `CNContactStoreDidChange`. A sync that stopped early, for example because the device was offline, tries again by itself when the app next becomes active, and one that stopped because every provider was rate limited tries again after the providers' 60 second cooldown. Addresses that couldn't be looked up because of a provider error or the request limit are remembered too, and looked up again each time the app becomes active. If access has already been granted, the locations stored by earlier syncs are published as soon as `configure(...)` has run.
+The fetcher doesn't sync by itself. Call `start(maxRequests:)` when you're ready to show the system prompt and to sync. It takes the request limit, so the first sync can't run under a limit your app hasn't decided yet. If the user hasn't been asked for Contacts access yet, `start(maxRequests:)` shows the prompt and waits for the answer before the first sync; to show the prompt earlier, call `requestAccess()`. It syncs now and again on every contact change, so the host doesn't listen for `CNContactStoreDidChange`. A sync that stopped early, for example because the device was offline, tries again by itself when the app next becomes active, and one that stopped because every provider was rate limited tries again after the providers' 60 second cooldown. Addresses that couldn't be looked up because of a provider error or the request limit are remembered too, and looked up again each time the app becomes active. If access has already been granted, the locations stored by earlier syncs are published as soon as `configure(...)` has run.
 
 `ContactHistoryFetcher` is `@MainActor` and `@Observable`. Read these properties and react when they change:
 
@@ -82,44 +82,33 @@ On iOS 26, UIKit also tracks properties you read inside `updateProperties()` aut
 
 ### Limiting requests
 
-Pass `maxRequests` to cap how many addresses the package will ever geocode:
+Pass `maxRequests` to `start(maxRequests:)` to cap how many addresses the package will ever geocode, or `nil` for no cap:
 
 ```swift
-ContactHistoryFetcher.configure(
-    mapsiAPIKey: mapsiKey,
-    googleAPIKey: googleKey,
-    maxRequests: isSubscribed ? nil : 20
-)
+await fetcher.start(maxRequests: isSubscribed ? nil : 20)
 ```
 
 - The count is saved across launches, and only `reset()` sets it back to zero. One address is one request, even if it falls through several providers. A request that fails with an error is not counted.
 - Once the cap is reached the remaining addresses are skipped without calling any provider, and `hasReachedRequestLimit` becomes true. The skipped addresses are remembered, so `setMaxRequests(_:)` with a higher limit (or `nil`) looks up only those; addresses that already have an answer are not looked up again and nothing stored is cleared. Showing an alert or a paywall is up to your app.
-- Call `await fetcher.setMaxRequests(nil)` (or a larger number) to change the cap, for example when the user subscribes. If addresses had been skipped and the new cap lets them through, the package clears its stored locations and sync token and geocodes everything again.
+- Call `await fetcher.setMaxRequests(nil)` (or a larger number) to change the cap, for example when the user subscribes. If addresses had been skipped and the new cap lets them through, only those are looked up; nothing stored is cleared.
 
 ### Starting over
 
 `await fetcher.reset()` clears the sync token and the stored locations, sets the request count back to zero, and geocodes every contact again. Because the count starts over, a user under a cap gets the full allowance again.
 
-### Using the geocoders on their own
+### Custom geocoders
 
-`MapKitGeocoder`, `MapsiGeocoder`, `GoogleGeocoder` and `FailoverGeocoder` are public and conform to the `Geocoder` protocol, so you can geocode an address without the rest of the package:
+The providers (MapKit, Google, Mapsi) and the failover between them are internal. The only public pieces are the `Geocoder` protocol and `GeocodingError`. `coordinate(for:)` returns `nil` for no match and throws a `GeocodingError` (`rateLimited`, `requestLimitReached`, `unavailable`, `unauthorized`, `invalidRequest` or `cancelled`), declared as typed throws. Internally, the failover tries every provider on every error except `invalidRequest`, and skips a provider for 60 seconds after it reports `rateLimited`.
 
-```swift
-let geocoder = FailoverGeocoder(providers: [MapKitGeocoder(), MapsiGeocoder(apiKey: key)])
-let coordinate = try await geocoder.coordinate(for: postalAddress)  // nil if no match
-```
-
-`coordinate(for:)` throws a `GeocodingError` (`rateLimited`, `requestLimitReached`, `unavailable`, `unauthorized`, `invalidRequest` or `cancelled`), declared as typed throws. `FailoverGeocoder` fails over on every error except `invalidRequest`, and skips a provider for 60 seconds after it reports `rateLimited`.
-
-To make the fetcher use your own geocoder, for example a mock in tests, pass anything that conforms to `Geocoder` to `configure` instead of keys:
+To make the fetcher use your own geocoder instead, for example a mock in tests, pass anything that conforms to `Geocoder` to `configure` instead of keys:
 
 ```swift
-ContactHistoryFetcher.configure(geocoder: MyGeocoder(), maxRequests: 20)
+ContactHistoryFetcher.configure(geocoder: MyGeocoder())
 ```
 
 ## How it works
 
-1. When the host calls `start()`, and on every `CNContactStoreDidChange` after that, the fetcher asks Contacts for the changes since its saved history token.
+1. When the host calls `start(maxRequests:)`, and on every `CNContactStoreDidChange` after that, the fetcher asks Contacts for the changes since its saved history token.
 2. Each added or updated contact has its postal addresses geocoded. Deleted contacts have their locations removed.
 3. Results are written to the store, then `contactLocationAnnotations` is refreshed from it. The token is saved once the changes have been applied.
 4. If the network drops while geocoding (for example `NSURLErrorNotConnectedToInternet`), the sync stops without saving the token. The next sync starts again from the saved token. Changes are idempotent, so ones applied before the pause are applied again without duplicating locations, but their addresses are geocoded again and count towards `maxRequests`.
@@ -141,9 +130,9 @@ To run it on a device, choose your team under Signing & Capabilities.
 
 ## Known limitations
 
-- **Syncing starts at `start()`.** Calling `configure(...)` only publishes the locations stored by earlier syncs. `start()` syncs right away, even with no network connection (a sync that can't geocode pauses and tries again when the app becomes active). Call it once your app knows the network is up if that matters.
+- **Syncing starts at `start(maxRequests:)`.** Calling `configure(...)` only publishes the locations stored by earlier syncs. `start(maxRequests:)` syncs right away, even with no network connection (a sync that can't geocode pauses and tries again when the app becomes active). Call it once your app knows the network is up if that matters.
 - **Free users can reach paid providers.** The keys you pass apply to every request. If MapKit finds no match or fails, the address goes to Google and Mapsi, and still counts as one request. To keep a tier on MapKit only, don't pass it keys.
-- **`reset()` and `setMaxRequests(_:)` can return before they take effect.** If a sync is running, it stops after the contact it is on, and the stored locations are cleared then. Otherwise they return once the new sync has finished.
+- **`reset()` and `setMaxRequests(_:)` can return before they take effect.** If a sync is running, it stops after the contact it is on and the new one starts then, which may be after the call returns. `reset()` clears the stored locations at that point; `setMaxRequests(_:)` clears nothing. Otherwise they return once the new sync has finished.
 - **Limited Contacts access** (`.limited`) is supported in code but has not been tested.
 - **No cache.** Every address is geocoded again after a `reset()`.
 

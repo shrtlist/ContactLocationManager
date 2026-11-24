@@ -100,7 +100,7 @@ struct ContentView: View {
                 await model.refreshCounts()
             }
             .task {
-                await fetcher.start()
+                await fetcher.start(maxRequests: model.requestLimit)
             }
             // Each CNContactStoreDidChange triggers a sync, so counts are read again when one finishes.
             .task(id: fetcher.syncProgress == nil) {

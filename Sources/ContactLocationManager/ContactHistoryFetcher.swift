@@ -64,35 +64,30 @@ public final class ContactHistoryFetcher {
     }
 
     /// Creates the shared fetcher. Call it once, at launch, before `shared`; a second call is a programmer error.
-    /// It doesn't sync by itself: the host calls `start()` when it's ready, for example once it knows the
-    /// request limit. If access has already been granted, the locations stored by earlier syncs are
+    /// It doesn't sync by itself: the host calls `start(maxRequests:)` when it's ready, for example once it
+    /// knows the request limit. If access has already been granted, the locations stored by earlier syncs are
     /// published right away. Otherwise `start()` shows the system prompt, or the host calls `requestAccess()`
     /// to show it earlier.
     /// Geocoding tries MapKit first, then Google, then Mapsi. A provider without a key is left out,
     /// and MapKit is left out when `includesMapKit` is false, for example to test another provider alone.
-    /// `maxRequests` is the total number of addresses that will ever be geocoded, or `nil` for no
-    /// limit. Contacts beyond it are skipped and `hasReachedRequestLimit` becomes true.
     /// `contactKeys` are the contact properties each annotation's `contact` has loaded, on top of
     /// the postal addresses, which are always loaded. The default is the name, thumbnail and type.
     /// They can only be chosen here.
     public static func configure(mapsiAPIKey: String? = nil,
                                  googleAPIKey: String? = nil,
                                  includesMapKit: Bool = true,
-                                 maxRequests: Int? = nil,
                                  contactKeys: [any CNKeyDescriptor] = ContactHistoryFetcher.defaultContactKeys) {
         configure(geocoder: GeocoderFactory.makeDefault(mapsiAPIKey: mapsiAPIKey,
                                                         googleAPIKey: googleAPIKey,
                                                         includesMapKit: includesMapKit),
-                  maxRequests: maxRequests,
                   contactKeys: contactKeys)
     }
 
     /// Like `configure(mapsiAPIKey:...)`, with your own geocoder, for example a mock.
     public static func configure(geocoder: any Geocoder,
-                                 maxRequests: Int? = nil,
                                  contactKeys: [any CNKeyDescriptor] = ContactHistoryFetcher.defaultContactKeys) {
         precondition(configured == nil, "ContactHistoryFetcher.configure(...) must be called only once")
-        configured = ContactHistoryFetcher(geocoder: geocoder, maxRequests: maxRequests, contactKeys: contactKeys)
+        configured = ContactHistoryFetcher(geocoder: geocoder, contactKeys: contactKeys)
     }
 
     /// Internal so tests can build their own fetchers; hosts use `configure(...)` and `shared`.
@@ -129,8 +124,14 @@ public final class ContactHistoryFetcher {
     }
 
     /// Asks for Contacts access if the user hasn't been asked yet, then syncs now, and again whenever the
-    /// contact store changes. Call it once the host is ready to show the system prompt and to sync, for
-    /// example once the request limit is set. Calling it again just syncs again.
+    /// contact store changes. Call it once the host is ready to show the system prompt and to sync.
+    /// Calling it again syncs again, and applies the `maxRequests` it is given.
+    ///
+    /// `maxRequests` is the total number of addresses that will ever be geocoded, or `nil` for no limit.
+    /// Contacts beyond it are skipped and `hasReachedRequestLimit` becomes true. It's a parameter here
+    /// so the first sync can't run under a limit the host hasn't decided yet: a subscriber's first sync
+    /// must not be capped at the free limit. To change it later, for example when the user subscribes,
+    /// call `setMaxRequests(_:)`.
     ///
     /// It waits for the user's answer before the first sync. If something else in the app already raised
     /// the prompt, for example another `CNContactStore` reading contacts, it waits for that same answer.
@@ -140,7 +141,9 @@ public final class ContactHistoryFetcher {
     /// while the app was away once the app is active again, so the host needs no foreground handling.
     /// Each time the app becomes active, addresses that couldn't be looked up earlier (a provider error, or
     /// the request limit) are looked up again, and a sync that stopped early syncs again.
-    public func start() async {
+    public func start(maxRequests: Int?) async {
+        // Before `isStarted`, so the new limit takes effect in the first sync below, not in a sync of its own.
+        await setMaxRequests(maxRequests)
         isStarted = true
         // Listening starts before the first sync, so a change arriving in between isn't missed.
         if contactChangeObservation == nil {
@@ -164,8 +167,7 @@ public final class ContactHistoryFetcher {
     }
 
     /// Asks Contacts for the changes since the last sync and applies them. Does nothing until
-    /// access has been granted. `start()` already does this on every contact change; call it directly
-    /// only to sync at another moment.
+    /// access has been granted. `start(maxRequests:)` already does this on every contact change.
     ///
     /// If the network goes down mid-sync, the sync stops without saving the history token, so the next
     /// sync reads the same changes again. A sync that stopped early, for example offline, tries again by itself
@@ -173,7 +175,7 @@ public final class ContactHistoryFetcher {
     /// again when the providers' cooldown is over. Both need `start()` to have been called.
     /// Calls that overlap are folded together: a call made during a sync returns at once, and the
     /// running sync reads the changes again straight afterwards.
-    public func fetchChanges() async {
+    func fetchChanges() async {
         // Access can be granted through another CNContactStore, which this fetcher wouldn't otherwise see.
         authorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
         guard hasAccess else { return }

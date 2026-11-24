@@ -14,21 +14,21 @@ import CoreLocation
 /// rather than reporting no match for an address nobody looked up.
 /// Stops without trying further providers once the calling task is cancelled.
 /// How long a provider that reports rate limiting is skipped. The fetcher waits this long before trying again.
-@usableFromInline let providerCooldown: Duration = .seconds(60)
+let providerCooldown: Duration = .seconds(60)
 
-public actor FailoverGeocoder<C: Clock>: Geocoder where C.Duration == Duration {
+actor FailoverGeocoder<C: Clock>: Geocoder where C.Duration == Duration {
     private let providers: [any Geocoder]
     private let cooldown: Duration
     private let clock: C
     private var cooldownUntil: [Int: C.Instant] = [:]
 
-    public init(providers: [any Geocoder], cooldown: Duration = providerCooldown, clock: C) {
+    init(providers: [any Geocoder], cooldown: Duration = providerCooldown, clock: C) {
         self.providers = providers
         self.cooldown = cooldown
         self.clock = clock
     }
 
-    public func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
+    func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
         while true {
             var lastError: GeocodingError?
             var skipped = 0
@@ -74,7 +74,7 @@ public actor FailoverGeocoder<C: Clock>: Geocoder where C.Duration == Duration {
     }
 }
 
-public extension FailoverGeocoder where C == ContinuousClock {
+extension FailoverGeocoder where C == ContinuousClock {
     init(providers: [any Geocoder], cooldown: Duration = providerCooldown) {
         self.init(providers: providers, cooldown: cooldown, clock: ContinuousClock())
     }

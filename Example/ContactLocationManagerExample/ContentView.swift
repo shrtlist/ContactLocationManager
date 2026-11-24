@@ -9,6 +9,12 @@ import SwiftUI
 import Contacts
 import ContactLocationManager
 
+/// What the contact counts depend on: they are read again whenever it changes.
+private struct CountsTrigger: Equatable {
+    let status: CNAuthorizationStatus
+    let isSyncing: Bool
+}
+
 struct ContentView: View {
     @Bindable var model: ExampleModel
     @State private var showsUngeocodedAddresses = false
@@ -96,14 +102,13 @@ struct ContentView: View {
             .sheet(isPresented: $showsUngeocodedAddresses) {
                 UngeocodedAddressesView(fetcher: fetcher)
             }
-            .task(id: fetcher.authorizationStatus) {
-                await model.refreshCounts()
-            }
             .task {
                 await fetcher.start(maxRequests: model.requestLimit)
             }
-            // Each CNContactStoreDidChange triggers a sync, so counts are read again when one finishes.
-            .task(id: fetcher.syncProgress == nil) {
+            // Counts are read at launch, when access changes and when a sync finishes. Each
+            // CNContactStoreDidChange triggers a sync, so that covers changes to the contacts too.
+            .task(id: CountsTrigger(status: fetcher.authorizationStatus, isSyncing: isSyncing)) {
+                guard !isSyncing else { return }
                 await model.refreshCounts()
             }
         }

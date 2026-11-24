@@ -174,7 +174,7 @@ public final class ContactHistoryFetcher {
     /// sync reads the same changes again. A sync that stopped early, for example offline, tries again by itself
     /// the next time the app becomes active, which needs `start()` to have been called. While every provider
     /// is rate limited the sync waits where it is, and carries on when their cooldown is over. If they still
-    /// refuse after two waits it stops, sets `syncError` to `.rateLimited`, and tries again like any other.
+    /// refuse after that wait it stops, sets `syncError` to `.rateLimited`, and tries again like any other.
     /// Calls that overlap are folded together: a call made during a sync returns at once, and the
     /// running sync reads the changes again straight afterwards.
     func fetchChanges() async {

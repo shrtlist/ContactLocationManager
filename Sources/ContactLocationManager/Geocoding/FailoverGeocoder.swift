@@ -10,7 +10,7 @@ import CoreLocation
 let providerCooldown: Duration = .seconds(60)
 
 /// How many cooldowns one lookup waits out before it gives up.
-private let maxCooldownWaits = 2
+private let maxCooldownWaits = 1
 
 /// Tries each provider in order and returns the first coordinate found.
 ///

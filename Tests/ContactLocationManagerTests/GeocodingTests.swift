@@ -115,15 +115,15 @@ private let address = CNPostalAddress()
         #expect(clock.now.offset == .seconds(60))
     }
 
-    @Test func givesUpAfterTwoCooldownsOfRefusals() async {
+    @Test func givesUpWhenStillRefusedAfterOneCooldown() async {
         let limited = StubGeocoder(.failure(.rateLimited))
         let clock = ManualClock()
         let geocoder = FailoverGeocoder(providers: [limited], cooldown: .seconds(60), clock: clock)
 
         await #expect(throws: GeocodingError.rateLimited) { try await geocoder.coordinate(for: address) }
 
-        #expect(limited.calls == 3)
-        #expect(clock.now.offset == .seconds(120))
+        #expect(limited.calls == 2)
+        #expect(clock.now.offset == .seconds(60))
     }
 
     /// Waiting would hold up every other address for as long as the fallback's quota is used up.

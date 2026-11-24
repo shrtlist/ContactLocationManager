@@ -386,12 +386,7 @@ public final class ContactHistoryFetcher {
     private static func fetchHistory(startingToken: Data?) async throws -> (Data?, [ContactHistoryChange]) {
         let fetchHistoryRequest = CNChangeHistoryFetchRequest()
         fetchHistoryRequest.startingToken = startingToken
-
-        // Geocoding needs the postal addresses; the full name is for the host's convenience.
-        fetchHistoryRequest.additionalContactKeyDescriptors = [
-            CNContactFormatter.descriptorForRequiredKeys(for: .fullName),
-            CNContactPostalAddressesKey as CNKeyDescriptor,
-        ]
+        fetchHistoryRequest.additionalContactKeyDescriptors = [CNContactPostalAddressesKey as CNKeyDescriptor]
 
         let wrapper = ContactStoreWrapper(store: CNContactStore())
         let result = try wrapper.changeHistoryFetchResult(fetchHistoryRequest)

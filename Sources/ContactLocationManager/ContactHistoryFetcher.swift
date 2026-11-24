@@ -314,7 +314,7 @@ public final class ContactHistoryFetcher {
                 try await interruptible { [contactActor] () async throws(GeocodingError) in try await contactActor.apply(contactHistoryChange) }
             } catch {
                 retryWhenActive = true
-                if error == .rateLimited { syncError = .rateLimited }
+                if error == .rateLimited { stopForRateLimit() }
                 await loadContactLocationAnnotations()
                 return
             }
@@ -344,10 +344,17 @@ public final class ContactHistoryFetcher {
             }
         } catch {
             retryWhenActive = true
-            if error == .rateLimited { syncError = .rateLimited }
+            if error == .rateLimited { stopForRateLimit() }
             return
         }
         hasReachedRequestLimit = await limiter.hasRefusedRequests
+    }
+
+    /// Drops the passes still queued: they would only wait out another cooldown. The next activation syncs again.
+    private func stopForRateLimit() {
+        syncError = .rateLimited
+        needsAnotherFetch = false
+        needsRetryPass = false
     }
 
     /// Runs a lookup so that `reset()` can cancel it.

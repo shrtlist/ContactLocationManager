@@ -33,7 +33,8 @@ public final class ContactHistoryFetcher {
     /// Cleared by `setMaxRequests(_:)` once the limit is raised.
     public private(set) var hasReachedRequestLimit = false
 
-    /// Why the fetcher couldn't read Contacts the last time it asked for changes, or `nil` if it could.
+    /// Why the last sync stopped: Contacts couldn't be read, or the geocoding providers kept refusing
+    /// requests. `nil` once a sync reads Contacts again.
     public private(set) var syncError: ContactSyncError?
 
     @ObservationIgnored private let contactActor: ContactActor
@@ -172,7 +173,8 @@ public final class ContactHistoryFetcher {
     /// If the network goes down mid-sync, the sync stops without saving the history token, so the next
     /// sync reads the same changes again. A sync that stopped early, for example offline, tries again by itself
     /// the next time the app becomes active, which needs `start()` to have been called. While every provider
-    /// is rate limited the sync waits where it is, and carries on when their cooldown is over.
+    /// is rate limited the sync waits where it is, and carries on when their cooldown is over. If they still
+    /// refuse after two waits it stops, sets `syncError` to `.rateLimited`, and tries again like any other.
     /// Calls that overlap are folded together: a call made during a sync returns at once, and the
     /// running sync reads the changes again straight afterwards.
     func fetchChanges() async {
@@ -287,10 +289,10 @@ public final class ContactHistoryFetcher {
 
         let startingToken = await contactActor.savedToken()
         let token: Data?
-        let changes: [ContactHistoryChange]
+        let contactHistoryChanges: [ContactHistoryChange]
 
         do {
-            (token, changes) = try await Self.fetchHistory(startingToken: startingToken)
+            (token, contactHistoryChanges) = try await Self.fetchHistory(startingToken: startingToken)
         } catch {
             Logger.contacts.error("Contacts history fetch failed: \(logDescription(of: error), privacy: .public)")
             if startingToken != nil {
@@ -307,22 +309,23 @@ public final class ContactHistoryFetcher {
         defer { syncProgress = nil }
 
         // Changes are idempotent, so after a pause the same history is simply applied again.
-        for (index, change) in changes.enumerated() {
+        for (index, contactHistoryChange) in contactHistoryChanges.enumerated() {
             do {
-                try await interruptible { [contactActor] () async throws(GeocodingError) in try await contactActor.apply(change) }
+                try await interruptible { [contactActor] () async throws(GeocodingError) in try await contactActor.apply(contactHistoryChange) }
             } catch {
                 retryWhenActive = true
+                if error == .rateLimited { syncError = .rateLimited }
                 await loadContactLocationAnnotations()
                 return
             }
-            syncProgress = Double(index + 1) / Double(changes.count)
+            syncProgress = Double(index + 1) / Double(contactHistoryChanges.count)
             guard !startOver else { return }
         }
 
         await contactActor.saveToken(token)
 
         // When nothing has been published yet, the stored list is published.
-        if !changes.isEmpty || contactLocationAnnotations.isEmpty {
+        if !contactHistoryChanges.isEmpty || contactLocationAnnotations.isEmpty {
             await loadContactLocationAnnotations()
         }
         let hasRefusedRequests = await limiter.hasRefusedRequests
@@ -341,6 +344,7 @@ public final class ContactHistoryFetcher {
             }
         } catch {
             retryWhenActive = true
+            if error == .rateLimited { syncError = .rateLimited }
             return
         }
         hasReachedRequestLimit = await limiter.hasRefusedRequests

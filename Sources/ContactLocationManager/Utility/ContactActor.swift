@@ -243,7 +243,7 @@ actor ContactActor {
         } catch .cancelled {
             throw .cancelled
         } catch .rateLimited {
-            // Only a host's own geocoder reports this: the built-in failover waits out its providers' cooldown.
+            // The providers are still refusing after the failover waited. The pass stops, and the address is asked again later.
             throw .rateLimited
         } catch .requestLimitReached {
             // Expected once the host's limit is used up, and every remaining address hits it, so it isn't

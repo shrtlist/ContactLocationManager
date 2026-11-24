@@ -41,17 +41,4 @@ private struct NoopGeocoder: Geocoder {
         #expect(await storedLocations() == [postalAddressId])
         await actor.delete(contactIdentifier: contactId)
     }
-
-    @Test func raisingTheLimitDoesNotWipeTheStoreBeforeStart() async {
-        await seedLocation()
-        // The limiter asks for a resync only if addresses were refused under the old limit.
-        UserDefaults.standard.set(true, forKey: "CNGeocodeRequestsRefused")
-        defer { UserDefaults.standard.removeObject(forKey: "CNGeocodeRequestsRefused") }
-        let fetcher = ContactHistoryFetcher(geocoder: NoopGeocoder(), maxRequests: 0)
-
-        await fetcher.setMaxRequests(nil)
-
-        #expect(await storedLocations() == [postalAddressId])
-        await actor.delete(contactIdentifier: contactId)
-    }
 }

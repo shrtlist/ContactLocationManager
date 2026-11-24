@@ -134,6 +134,16 @@ private let address = CNPostalAddress()
         }
     }
 
+    /// The provider that is cooling down might have found it, so the address must not be stored as a no match.
+    @Test func noMatchWhileAnotherProviderCoolsDownLeavesTheAddressForLater() async {
+        let limited = StubGeocoder(.failure(.rateLimited))
+        let geocoder = FailoverGeocoder(providers: [StubGeocoder(.noMatch), limited], cooldown: .seconds(60), clock: ManualClock())
+        _ = try? await geocoder.coordinate(for: address)
+
+        await #expect(throws: GeocodingError.unavailable) { try await geocoder.coordinate(for: address) }
+        #expect(limited.calls == 1)
+    }
+
     @Test func cancelledWhileWaitingOutTheCooldown() async {
         let geocoder = FailoverGeocoder(providers: [StubGeocoder(.failure(.rateLimited))], cooldown: .seconds(60))
         let task = Task { try await geocoder.coordinate(for: address) }

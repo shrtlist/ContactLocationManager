@@ -65,7 +65,8 @@ actor FailoverGeocoder<C: Clock>: Geocoder where C.Duration == Duration {
             let now = clock.now
             let cooldownEnds = cooldownUntil.values.filter { $0 > now }
             guard cooldownEnds.count == providers.count, let earliest = cooldownEnds.min() else {
-                if lastError != nil { throw .unavailable }
+                // A provider that is cooling down wasn't asked, so the others' "no match" isn't final.
+                if lastError != nil || !cooldownEnds.isEmpty { throw .unavailable }
                 return nil
             }
 

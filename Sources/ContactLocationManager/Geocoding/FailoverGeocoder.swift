@@ -22,7 +22,7 @@ public actor FailoverGeocoder<C: Clock>: Geocoder where C.Duration == Duration {
     private let clock: C
     private var cooldownUntil: [Int: C.Instant] = [:]
 
-    public init(providers: [any Geocoder], cooldown: Duration = providerCooldown, clock: C) {
+    init(providers: [any Geocoder], cooldown: Duration = providerCooldown, clock: C) {
         self.providers = providers
         self.cooldown = cooldown
         self.clock = clock

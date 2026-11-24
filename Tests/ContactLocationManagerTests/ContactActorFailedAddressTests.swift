@@ -65,7 +65,7 @@ private struct PickyGeocoder: Geocoder {
     }
 
     /// Not the user's to fix, so it isn't listed. It waits for `retryPending()` instead.
-    @Test(arguments: [GeocodingError.requestLimitReached, .unavailable, .unauthorized])
+    @Test(arguments: [GeocodingError.requestLimitReached, .unavailable, .unauthorized, .rateLimited])
     func anAddressThatCouldNotBeAskedWaitsForARetry(error: GeocodingError) async throws {
         let actor = actor(ScriptedGeocoder(.failure(error)))
         let (contact, ids) = self.contact(streets: ["1 Main St"])
@@ -92,7 +92,7 @@ private struct PickyGeocoder: Geocoder {
         await actor.delete(contactIdentifier: contact.identifier)
     }
 
-    @Test(arguments: [GeocodingError.offline, .rateLimited, .cancelled])
+    @Test(arguments: [GeocodingError.offline, .cancelled])
     func leavesTheStoreAloneWhenTheSyncPauses(error: GeocodingError) async throws {
         let geocoder = ScriptedGeocoder(.noMatch)
         let actor = actor(geocoder)

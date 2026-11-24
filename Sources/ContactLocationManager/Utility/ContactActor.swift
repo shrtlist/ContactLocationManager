@@ -81,7 +81,7 @@ actor ContactActor {
         }
     }
 
-    /// Throws .offline, .rateLimited or .cancelled before touching the store if the change couldn't be geocoded.
+    /// Throws .offline or .cancelled before touching the store if the change couldn't be geocoded.
     func apply(_ change: ContactHistoryChange) async throws(GeocodingError) {
         switch change {
         case .removeAll: removeAll()
@@ -121,7 +121,7 @@ actor ContactActor {
     
     /// Looks up again the addresses that couldn't be asked earlier (a provider error, or the host's request limit).
     /// Returns true if any of them now has an answer. An address whose text changed since is left to the sync,
-    /// which sees the new text. Throws `.offline`, `.rateLimited` or `.cancelled` so the pass can pause.
+    /// which sees the new text. Throws `.offline` or `.cancelled` so the pass can pause.
     func retryPending() async throws(GeocodingError) -> Bool {
         let pending = await SkopelosClient.shared.read { context in
             FailedAddress.SK_all(context).filter(\.needsRetry).map {
@@ -201,12 +201,12 @@ actor ContactActor {
     private enum Lookup {
         case located(CLLocationCoordinate2D)
         case noMatch
-        /// Couldn't be asked: a provider error or the host's request limit. Looked up again by `retryPending()`.
+        /// Couldn't be asked: a provider error, a rate limit or the host's request limit. Looked up again by `retryPending()`.
         case retry
     }
 
     /// Geocodes the given addresses, keyed by postal address identifier.
-    /// Throws `.offline`, `.rateLimited` or `.cancelled` so the sync can pause.
+    /// Throws `.offline` or `.cancelled` so the sync can pause.
     private func geocode(_ addresses: [CNLabeledValue<CNPostalAddress>]) async throws(GeocodingError) -> [String: Lookup] {
         var lookups: [String: Lookup] = [:]
         for address in addresses {
@@ -242,12 +242,9 @@ actor ContactActor {
             throw .offline
         } catch .cancelled {
             throw .cancelled
-        } catch .rateLimited {
-            // The providers are still refusing after the failover waited. The pass stops, and the address is asked again later.
-            throw .rateLimited
-        } catch .requestLimitReached {
-            // Expected once the host's limit is used up, and every remaining address hits it, so it isn't
-            // logged per address. The fetcher logs it once when the pass ends.
+        } catch .requestLimitReached, .rateLimited {
+            // Expected once the host's limit is used up or a provider is rate limited, and every remaining
+            // address may hit it, so it isn't logged per address.
             return .retry
         } catch .invalidRequest {
             // Every provider rejects the address itself, so it needs correcting, like a no match.

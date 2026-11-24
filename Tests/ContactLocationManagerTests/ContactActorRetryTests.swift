@@ -37,7 +37,7 @@ private final class ContactBook: @unchecked Sendable {
         return contact
     }
 
-    @Test(arguments: [GeocodingError.unavailable, .unauthorized, .requestLimitReached])
+    @Test(arguments: [GeocodingError.unavailable, .unauthorized, .requestLimitReached, .rateLimited])
     func aRetryStoresTheLocationOnceTheAddressCanBeAsked(error: GeocodingError) async throws {
         let geocoder = ScriptedGeocoder(.latitude(3))
         let actor = actor(geocoder)
@@ -125,7 +125,7 @@ private final class ContactBook: @unchecked Sendable {
         await actor.delete(contactIdentifier: contact.identifier)
     }
 
-    @Test(arguments: [GeocodingError.offline, .rateLimited, .cancelled])
+    @Test(arguments: [GeocodingError.offline, .cancelled])
     func aRetryPausesWithoutLosingTheRow(error: GeocodingError) async throws {
         let geocoder = ScriptedGeocoder(.latitude(1))
         let actor = actor(geocoder)

@@ -23,18 +23,6 @@ private final class StubGeocoder: Geocoder {
     }
 }
 
-/// Rate limited the first time it is asked, then finds the address.
-private final class LimitedOnceGeocoder: Geocoder {
-    private let callCount = Mutex(0)
-    var calls: Int { callCount.withLock { $0 } }
-
-    func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
-        let call = callCount.withLock { $0 += 1; return $0 }
-        if call == 1 { throw .rateLimited }
-        return CLLocationCoordinate2D(latitude: 1, longitude: 1)
-    }
-}
-
 private let address = CNPostalAddress()
 
 @Suite struct FailoverGeocoderTests {
@@ -89,104 +77,38 @@ private let address = CNPostalAddress()
         }
     }
 
-    @Test func rateLimitedProviderIsSkippedUntilCooldownEnds() async throws {
+    @Test func rateLimitedProviderIsLeftOutUntilCleared() async throws {
         let limited = StubGeocoder(.failure(.rateLimited)), backup = StubGeocoder(.coordinate(2))
-        let clock = ManualClock()
-        let geocoder = FailoverGeocoder(providers: [limited, backup], cooldown: .seconds(60), clock: clock)
+        let geocoder = FailoverGeocoder(providers: [limited, backup])
 
         _ = try await geocoder.coordinate(for: address)
         _ = try await geocoder.coordinate(for: address)
         #expect(limited.calls == 1)
 
-        clock.advance(by: .seconds(61))
+        await geocoder.clearRateLimits()
         _ = try await geocoder.coordinate(for: address)
         #expect(limited.calls == 2)
     }
 
-    @Test func waitsOutTheCooldownWhenEveryProviderIsRateLimited() async throws {
-        let limited = LimitedOnceGeocoder()
-        let clock = ManualClock()
-        let geocoder = FailoverGeocoder(providers: [limited], cooldown: .seconds(60), clock: clock)
-
-        let result = try await geocoder.coordinate(for: address)
-
-        #expect(result?.latitude == 1)
-        #expect(limited.calls == 2)
-        #expect(clock.now.offset == .seconds(60))
-    }
-
-    @Test func givesUpWhenStillRefusedAfterOneCooldown() async {
+    @Test func aRateLimitedOnlyProviderIsNotAskedAgainAndNothingWaits() async {
         let limited = StubGeocoder(.failure(.rateLimited))
-        let clock = ManualClock()
-        let geocoder = FailoverGeocoder(providers: [limited], cooldown: .seconds(60), clock: clock)
+        let geocoder = FailoverGeocoder(providers: [limited])
 
-        await #expect(throws: GeocodingError.rateLimited) { try await geocoder.coordinate(for: address) }
-
-        #expect(limited.calls == 2)
-        #expect(clock.now.offset == .seconds(60))
-    }
-
-    @Test func cancellingTheCooldownsAsksAtOnceAndDoesNotWait() async {
-        let limited = StubGeocoder(.failure(.rateLimited))
-        let clock = ManualClock()
-        let geocoder = FailoverGeocoder(providers: [limited], cooldown: .seconds(60), clock: clock)
-        _ = try? await geocoder.coordinate(for: address)
-
-        await geocoder.cancelCooldowns()
-        await #expect(throws: GeocodingError.rateLimited) { try await geocoder.coordinate(for: address) }
-
-        #expect(limited.calls == 3)
-        #expect(clock.now.offset == .seconds(60))
-    }
-
-    /// Waiting would hold up every other address for as long as the fallback's quota is used up.
-    @Test func aRateLimitedFallbackLeavesTheAddressForLater() async {
-        let providers: [StubGeocoder] = [.init(.noMatch), .init(.failure(.rateLimited))]
-        await #expect(throws: GeocodingError.unavailable) {
-            try await FailoverGeocoder(providers: providers).coordinate(for: address)
+        for _ in 0..<3 {
+            await #expect(throws: GeocodingError.rateLimited) { try await geocoder.coordinate(for: address) }
         }
-    }
 
-    /// The provider that is cooling down might have found it, so the address must not be stored as a no match.
-    @Test func noMatchWhileAnotherProviderCoolsDownLeavesTheAddressForLater() async {
-        let limited = StubGeocoder(.failure(.rateLimited))
-        let geocoder = FailoverGeocoder(providers: [StubGeocoder(.noMatch), limited], cooldown: .seconds(60), clock: ManualClock())
-        _ = try? await geocoder.coordinate(for: address)
-
-        await #expect(throws: GeocodingError.unavailable) { try await geocoder.coordinate(for: address) }
         #expect(limited.calls == 1)
     }
 
-    @Test func cancelledWhileWaitingOutTheCooldown() async {
-        let geocoder = FailoverGeocoder(providers: [StubGeocoder(.failure(.rateLimited))], cooldown: .seconds(60))
-        let task = Task { try await geocoder.coordinate(for: address) }
-        try? await Task.sleep(for: .milliseconds(100))
-        task.cancel()
-        await #expect(throws: GeocodingError.cancelled) { try await task.value }
-    }
-}
+    /// The provider that is left out might have found it, so the address must not be stored as a no match.
+    @Test func noMatchWhileAnotherProviderIsLeftOutLeavesTheAddressForLater() async {
+        let limited = StubGeocoder(.failure(.rateLimited))
+        let geocoder = FailoverGeocoder(providers: [StubGeocoder(.noMatch), limited])
 
-private struct ManualInstant: InstantProtocol {
-    var offset: Duration
-
-    func advanced(by duration: Duration) -> ManualInstant { ManualInstant(offset: offset + duration) }
-    func duration(to other: ManualInstant) -> Duration { other.offset - offset }
-    static func < (lhs: ManualInstant, rhs: ManualInstant) -> Bool { lhs.offset < rhs.offset }
-}
-
-private final class ManualClock: Clock, Sendable {
-    typealias Duration = Swift.Duration
-    private let elapsed = Mutex(Duration.zero)
-
-    var now: ManualInstant { ManualInstant(offset: elapsed.withLock { $0 }) }
-    var minimumResolution: Duration { .zero }
-
-    func advance(by duration: Duration) { elapsed.withLock { $0 += duration } }
-
-    /// Time only passes when someone sleeps, so a waiting geocoder wakes at its deadline.
-    func sleep(until deadline: ManualInstant, tolerance: Duration?) async throws {
-        try Task.checkCancellation()
-        elapsed.withLock { $0 = max($0, deadline.offset) }
+        await #expect(throws: GeocodingError.rateLimited) { try await geocoder.coordinate(for: address) }
+        await #expect(throws: GeocodingError.rateLimited) { try await geocoder.coordinate(for: address) }
+        #expect(limited.calls == 1)
     }
 }
 

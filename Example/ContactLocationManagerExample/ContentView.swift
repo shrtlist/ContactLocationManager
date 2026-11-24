@@ -68,15 +68,9 @@ struct ContentView: View {
                     }
                     LabeledContent("Locations", value: "\(fetcher.contactLocationAnnotations.count)")
                     LabeledContent("Not found", value: "\(fetcher.ungeocodedAddresses.count)")
-                    switch fetcher.syncError {
-                    case .contactsUnreadable(let underlying):
+                    if case .contactsUnreadable(let underlying) = fetcher.syncError {
                         Text("Couldn't read Contacts: \(underlying.localizedDescription)")
                             .foregroundStyle(.red)
-                    case .rateLimited:
-                        Text("The geocoders are rate limited. The sync will try again when the app is next opened.")
-                            .foregroundStyle(.red)
-                    case nil:
-                        EmptyView()
                     }
                     Button("Reset and Geocode Again", role: .destructive) {
                         Task { await fetcher.reset() }

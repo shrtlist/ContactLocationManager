@@ -53,8 +53,8 @@ actor RequestLimitedGeocoder: Geocoder {
         self.geocoder = geocoder
     }
 
-    func cancelCooldowns() async {
-        await (geocoder as? any CooldownCancelling)?.cancelCooldowns()
+    func clearRateLimits() async {
+        await (geocoder as? any RateLimitClearing)?.clearRateLimits()
     }
 
     /// Starts counting from zero again.

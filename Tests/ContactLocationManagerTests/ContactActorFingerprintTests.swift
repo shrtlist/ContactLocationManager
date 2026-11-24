@@ -94,17 +94,12 @@ import CoreLocation
         try await actor.apply(.insert(contact))
         geocoder.answer = .failure(error)
 
-        // `.rateLimited` pauses the sync, which leaves the store as it was; the others reach the store.
-        try? await actor.apply(.update(edited(contact, streets: [0: "2 Main St"])))
+        try await actor.apply(.update(edited(contact, streets: [0: "2 Main St"])))
 
         let stored = await actor.storedAddressIds(forContactId: contact.identifier)
-        if error == .rateLimited {
-            #expect(stored.located.count == 1)
-        } else {
-            #expect(stored.located.isEmpty)
-            #expect(stored.failed.isEmpty)
-            #expect(stored.pending.count == 1)
-        }
+        #expect(stored.located.isEmpty)
+        #expect(stored.failed.isEmpty)
+        #expect(stored.pending.count == 1)
         await actor.delete(contactIdentifier: contact.identifier)
     }
 

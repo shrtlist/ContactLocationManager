@@ -7,7 +7,4 @@
 public enum ContactSyncError: Error, Sendable {
     /// Contacts couldn't be asked for its changes. `underlying` is the error Contacts gave, usually a `CNError`.
     case contactsUnreadable(underlying: any Error)
-    /// The geocoding providers kept refusing requests as too frequent, so the sync stopped part way.
-    /// It tries again the next time the app becomes active.
-    case rateLimited
 }

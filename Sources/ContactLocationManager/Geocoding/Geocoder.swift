@@ -8,7 +8,7 @@ import CoreLocation
 
 /// Provider-independent failure modes, so failover logic doesn't need to know any service's details.
 public enum GeocodingError: Error, Sendable {
-    /// Quota or throttling hit. The provider should be skipped for a while.
+    /// Quota or throttling hit. The address is asked again later.
     case rateLimited
     /// The host's own request limit (`maxRequests`) is used up. Nothing was sent to a provider, and the
     /// address is geocoded once the limit is raised.

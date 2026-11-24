@@ -143,7 +143,7 @@ actor ContactActor {
             guard let contact = contactsById[contactId] else {
                 // Deleted, or no longer visible with limited access: nothing left to look up.
                 SkopelosClient.shared.writeSync { context in
-                    for row in FailedAddress.SK_all("contactId", isEqualTo: contactId, sortTerms: "contactId", ascending: false, context: context) where row.needsRetry {
+                    for row in FailedAddress.rows(forContactId: contactId, in: context) where row.needsRetry {
                         row.SK_remove(context)
                     }
                 }
@@ -176,8 +176,8 @@ actor ContactActor {
     /// `failed` are the no-match addresses, `pending` the ones waiting for `retryPending()`.
     func storedAddressIds(forContactId contactId: String) async -> (located: Set<String>, failed: Set<String>, pending: Set<String>) {
         await SkopelosClient.shared.read { context in
-            let located = ContactLocation.SK_all("contactId", isEqualTo: contactId, sortTerms: "contactId", ascending: false, context: context)
-            let rows = FailedAddress.SK_all("contactId", isEqualTo: contactId, sortTerms: "contactId", ascending: false, context: context)
+            let located = ContactLocation.rows(forContactId: contactId, in: context)
+            let rows = FailedAddress.rows(forContactId: contactId, in: context)
             return (Set(located.map(\.postalAddressId)),
                     Set(rows.filter { !$0.needsRetry }.map(\.postalAddressId)),
                     Set(rows.filter(\.needsRetry).map(\.postalAddressId)))
@@ -187,7 +187,7 @@ actor ContactActor {
     /// Latitude stored for each postal address of the contact, for tests.
     func storedLatitudes(forContactId contactId: String) async -> [String: Double] {
         await SkopelosClient.shared.read { context in
-            let rows = ContactLocation.SK_all("contactId", isEqualTo: contactId, sortTerms: "contactId", ascending: false, context: context)
+            let rows = ContactLocation.rows(forContactId: contactId, in: context)
             return Dictionary(uniqueKeysWithValues: rows.map { ($0.postalAddressId, $0.latitude) })
         }
     }
@@ -240,10 +240,10 @@ actor ContactActor {
     private func answeredFingerprints(forContactId contactId: String) async -> [String: String] {
         await SkopelosClient.shared.read { context in
             var answered: [String: String] = [:]
-            for row in ContactLocation.SK_all("contactId", isEqualTo: contactId, sortTerms: "contactId", ascending: false, context: context) {
+            for row in ContactLocation.rows(forContactId: contactId, in: context) {
                 answered[row.postalAddressId] = row.addressFingerprint
             }
-            for row in FailedAddress.SK_all("contactId", isEqualTo: contactId, sortTerms: "contactId", ascending: false, context: context) where !row.needsRetry {
+            for row in FailedAddress.rows(forContactId: contactId, in: context) where !row.needsRetry {
                 answered[row.postalAddressId] = row.addressFingerprint
             }
             return answered
@@ -284,13 +284,13 @@ actor ContactActor {
     }
 
     private static func delete(contactIdentifier: String, in context: NSManagedObjectContext) {
-        let contactLocations = ContactLocation.SK_all("contactId", isEqualTo: contactIdentifier, sortTerms: "contactId", ascending: false, context: context)
+        let contactLocations = ContactLocation.rows(forContactId: contactIdentifier, in: context)
         
         for contactLocation in contactLocations {
             contactLocation.SK_remove(context)
         }
 
-        let failedAddresses = FailedAddress.SK_all("contactId", isEqualTo: contactIdentifier, sortTerms: "contactId", ascending: false, context: context)
+        let failedAddresses = FailedAddress.rows(forContactId: contactIdentifier, in: context)
 
         for failedAddress in failedAddresses {
             failedAddress.SK_remove(context)
@@ -300,8 +300,8 @@ actor ContactActor {
     /// Brings the contact's rows in line with its current addresses, in one transaction. An address that
     /// has no entry in `lookups` wasn't looked up because it hasn't changed, and is left alone.
     private static func store(_ lookups: [String: Lookup], for contact: CNContact, in context: NSManagedObjectContext) {
-        let locations = ContactLocation.SK_all("contactId", isEqualTo: contact.identifier, sortTerms: "contactId", ascending: false, context: context)
-        let failures = FailedAddress.SK_all("contactId", isEqualTo: contact.identifier, sortTerms: "contactId", ascending: false, context: context)
+        let locations = ContactLocation.rows(forContactId: contact.identifier, in: context)
+        let failures = FailedAddress.rows(forContactId: contact.identifier, in: context)
         let currentIds = Set(contact.postalAddresses.map(\.identifier))
 
         for location in locations where !currentIds.contains(location.postalAddressId) { location.SK_remove(context) }

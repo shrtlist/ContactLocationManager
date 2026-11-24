@@ -22,6 +22,13 @@ extension Skopelos {
     }
 }
 
+extension NSManagedObjectExtendable where Self: NSManagedObject {
+    /// Every row of this entity stored for the contact.
+    static func rows(forContactId contactId: String, in context: NSManagedObjectContext) -> [Self] {
+        SK_all(NSPredicate(format: "contactId = %@", contactId), context: context)
+    }
+}
+
 // Skopelos serializes access to its contexts itself, so sharing one client across actors is safe.
 final class SkopelosClient: Skopelos, @unchecked Sendable {
     private static let modelURL: URL = {

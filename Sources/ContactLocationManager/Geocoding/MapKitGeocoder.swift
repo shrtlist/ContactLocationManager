@@ -7,8 +7,6 @@
 import MapKit
 
 struct MapKitGeocoder: Geocoder {
-    init() {}
-
     func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
         guard let request = MKGeocodingRequest(addressString: postalAddress.addressString) else { return nil }
 

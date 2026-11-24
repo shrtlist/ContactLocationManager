@@ -11,7 +11,7 @@
 
 import CoreData
 @preconcurrency import Contacts
-import MapKit
+import CoreLocation
 import OSLog
 
 /// A single change reported by the contact store's change history.

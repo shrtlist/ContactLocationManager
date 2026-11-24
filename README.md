@@ -88,7 +88,7 @@ Pass `maxRequests` to `start(maxRequests:)` to cap how many addresses the packag
 await fetcher.start(maxRequests: isSubscribed ? nil : 20)
 ```
 
-- The count is saved across launches, and only `reset()` sets it back to zero. One address is one request, even if it falls through several providers. A request that fails with an error is not counted.
+- The count is saved across launches in the same Core Data store as the locations, so a store that has to be rebuilt starts counting again too. Only `reset()` sets it back to zero. One address is one request, even if it falls through several providers. A request that fails with an error is not counted.
 - Once the cap is reached the remaining addresses are skipped without calling any provider, and `hasReachedRequestLimit` becomes true. The skipped addresses are remembered, so `setMaxRequests(_:)` with a higher limit (or `nil`) looks up only those; addresses that already have an answer are not looked up again and nothing stored is cleared. Showing an alert or a paywall is up to your app.
 - Call `await fetcher.setMaxRequests(nil)` (or a larger number) to change the cap, for example when the user subscribes. If addresses had been skipped and the new cap lets them through, only those are looked up; nothing stored is cleared.
 

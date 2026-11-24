@@ -78,3 +78,10 @@ func edited(_ contact: CNContact, streets: [Int: String]) -> CNContact {
     }
     return copy
 }
+
+/// Keeps the count in memory, so a test doesn't touch the shared store.
+final class InMemoryRequestCountStore: RequestCountStore {
+    private let stored = Mutex(RequestCount())
+    func load() async -> RequestCount { stored.withLock { $0 } }
+    func save(_ requestCount: RequestCount) { stored.withLock { $0 = requestCount } }
+}

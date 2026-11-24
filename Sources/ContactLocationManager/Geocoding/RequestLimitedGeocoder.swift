@@ -11,39 +11,42 @@ import CoreLocation
 /// A `nil` limit means no limit.
 actor RequestLimitedGeocoder: Geocoder {
     private var geocoder: any Geocoder
-    private let defaults: UserDefaults
+    private let store: any RequestCountStore
     private var maxRequests: Int?
+    private var state = RequestCount()
+    private var isLoaded = false
 
-    private let countKey = "CNGeocodeRequestCount"
-    private let refusedKey = "CNGeocodeRequestsRefused"
-
-    init(geocoder: any Geocoder, maxRequests: Int?, defaults: UserDefaults = .standard) {
+    init(geocoder: any Geocoder, maxRequests: Int?, store: any RequestCountStore = CoreDataRequestCountStore()) {
         self.geocoder = geocoder
         self.maxRequests = maxRequests
-        self.defaults = defaults
+        self.store = store
     }
 
     /// True once a request has been refused because of the limit, until the limit is raised.
-    var hasRefusedRequests: Bool { defaults.bool(forKey: refusedKey) }
-
-    private var count: Int {
-        get { defaults.integer(forKey: countKey) }
-        set { defaults.set(newValue, forKey: countKey) }
+    var hasRefusedRequests: Bool {
+        get async {
+            await load()
+            return state.refused
+        }
     }
 
     func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
-        if let maxRequests, count >= maxRequests {
-            defaults.set(true, forKey: refusedKey)
+        await load()
+        if let maxRequests, state.count >= maxRequests {
+            state.refused = true
+            store.save(state)
             throw .requestLimitReached
         }
 
         // Reserve before awaiting so overlapping requests can't overshoot the limit.
-        count += 1
+        state.count += 1
+        store.save(state)
         do throws(GeocodingError) {
             return try await geocoder.coordinate(for: postalAddress)
         } catch {
             // A request that failed to get an answer doesn't count. `resetCount()` may have run meanwhile.
-            count = max(count - 1, 0)
+            state.count = max(state.count - 1, 0)
+            store.save(state)
             throw error
         }
     }
@@ -59,16 +62,28 @@ actor RequestLimitedGeocoder: Geocoder {
 
     /// Starts counting from zero again.
     func resetCount() {
-        count = 0
-        defaults.set(false, forKey: refusedKey)
+        state = RequestCount()
+        isLoaded = true
+        store.save(state)
     }
 
     /// Returns true if requests had been refused and the new limit lets them through now,
     /// meaning the refused addresses need geocoding again.
-    func setMaxRequests(_ newValue: Int?) -> Bool {
+    func setMaxRequests(_ newValue: Int?) async -> Bool {
+        await load()
         maxRequests = newValue
-        guard hasRefusedRequests, newValue.map({ count < $0 }) ?? true else { return false }
-        defaults.set(false, forKey: refusedKey)
+        guard state.refused, newValue.map({ state.count < $0 }) ?? true else { return false }
+        state.refused = false
+        store.save(state)
         return true
+    }
+
+    private func load() async {
+        guard !isLoaded else { return }
+        let loaded = await store.load()
+        // `resetCount()` may have run while this waited.
+        guard !isLoaded else { return }
+        state = loaded
+        isLoaded = true
     }
 }

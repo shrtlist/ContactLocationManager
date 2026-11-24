@@ -90,7 +90,7 @@ await fetcher.start(maxRequests: isSubscribed ? nil : 20)
 
 - The count is saved across launches, and only `reset()` sets it back to zero. One address is one request, even if it falls through several providers. A request that fails with an error is not counted.
 - Once the cap is reached the remaining addresses are skipped without calling any provider, and `hasReachedRequestLimit` becomes true. The skipped addresses are remembered, so `setMaxRequests(_:)` with a higher limit (or `nil`) looks up only those; addresses that already have an answer are not looked up again and nothing stored is cleared. Showing an alert or a paywall is up to your app.
-- Call `await fetcher.setMaxRequests(nil)` (or a larger number) to change the cap, for example when the user subscribes. If addresses had been skipped and the new cap lets them through, the package clears its stored locations and sync token and geocodes everything again.
+- Call `await fetcher.setMaxRequests(nil)` (or a larger number) to change the cap, for example when the user subscribes. If addresses had been skipped and the new cap lets them through, only those are looked up; nothing stored is cleared.
 
 ### Starting over
 
@@ -139,7 +139,7 @@ To run it on a device, choose your team under Signing & Capabilities.
 
 - **Syncing starts at `start(maxRequests:)`.** Calling `configure(...)` only publishes the locations stored by earlier syncs. `start(maxRequests:)` syncs right away, even with no network connection (a sync that can't geocode pauses and tries again when the app becomes active). Call it once your app knows the network is up if that matters.
 - **Free users can reach paid providers.** The keys you pass apply to every request. If MapKit finds no match or fails, the address goes to Google and Mapsi, and still counts as one request. To keep a tier on MapKit only, don't pass it keys.
-- **`reset()` and `setMaxRequests(_:)` can return before they take effect.** If a sync is running, it stops after the contact it is on, and the stored locations are cleared then. Otherwise they return once the new sync has finished.
+- **`reset()` and `setMaxRequests(_:)` can return before they take effect.** If a sync is running, it stops after the contact it is on and the new one starts then, which may be after the call returns. `reset()` clears the stored locations at that point; `setMaxRequests(_:)` clears nothing. Otherwise they return once the new sync has finished.
 - **Limited Contacts access** (`.limited`) is supported in code but has not been tested.
 - **No cache.** Every address is geocoded again after a `reset()`.
 

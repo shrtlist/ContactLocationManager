@@ -12,6 +12,12 @@ let providerCooldown: Duration = .seconds(60)
 /// How many cooldowns one lookup waits out before it gives up.
 private let maxCooldownWaits = 1
 
+/// A geocoder whose cooldowns can be cut short.
+protocol CooldownCancelling: Geocoder {
+    /// Forgets the cooldowns, so the next lookup asks every provider at once. If it is refused again it gives up without waiting.
+    func cancelCooldowns() async
+}
+
 /// Tries each provider in order and returns the first coordinate found.
 ///
 /// Fails over on no-match and on recoverable errors, but not on `.invalidRequest` or `.offline`.
@@ -20,11 +26,12 @@ private let maxCooldownWaits = 1
 /// and throws `.rateLimited` if they still refuse after `maxCooldownWaits` waits.
 /// When only some are, and the others found no match, throws `.unavailable` so the address is asked again later.
 /// Stops without trying further providers once the calling task is cancelled.
-actor FailoverGeocoder<C: Clock>: Geocoder where C.Duration == Duration {
+actor FailoverGeocoder<C: Clock>: CooldownCancelling where C.Duration == Duration {
     private let providers: [any Geocoder]
     private let cooldown: Duration
     private let clock: C
     private var cooldownUntil: [Int: C.Instant] = [:]
+    private var skipsNextWait = false
 
     init(providers: [any Geocoder], cooldown: Duration = providerCooldown, clock: C) {
         self.providers = providers
@@ -33,7 +40,8 @@ actor FailoverGeocoder<C: Clock>: Geocoder where C.Duration == Duration {
     }
 
     func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
-        var waits = 0
+        var waits = skipsNextWait ? maxCooldownWaits : 0
+        skipsNextWait = false
 
         while true {
             var lastError: GeocodingError?
@@ -79,6 +87,13 @@ actor FailoverGeocoder<C: Clock>: Geocoder where C.Duration == Duration {
                 throw .cancelled
             }
         }
+    }
+}
+
+extension FailoverGeocoder {
+    func cancelCooldowns() {
+        cooldownUntil = [:]
+        skipsNextWait = true
     }
 }
 

@@ -263,6 +263,9 @@ public final class ContactHistoryFetcher {
         isFetching = true
         defer { isFetching = false }
 
+        // The last sync gave up on a rate limit: this one asks the providers again at once.
+        if case .rateLimited = syncError { await limiter.cancelCooldowns() }
+
         while startOver || needsAnotherFetch || needsRetryPass {
             if startOver {
                 startOver = false

@@ -7,14 +7,14 @@
 import CoreLocation
 
 /// https://developers.google.com/maps/documentation/geocoding
-public struct GoogleGeocoder: Geocoder {
+struct GoogleGeocoder: Geocoder {
     let apiKey: String
     let session: URLSession
     let bundleIdentifier: String?
 
     /// - Parameter bundleIdentifier: Sent as `X-Ios-Bundle-Identifier` so a key restricted to iOS apps in the
     ///   Google Cloud console is accepted. Defaults to the host app's bundle identifier.
-    public init(apiKey: String, session: URLSession = .shared, bundleIdentifier: String? = Bundle.main.bundleIdentifier) {
+    init(apiKey: String, session: URLSession = .shared, bundleIdentifier: String? = Bundle.main.bundleIdentifier) {
         self.apiKey = apiKey
         self.session = session
         self.bundleIdentifier = bundleIdentifier
@@ -32,7 +32,7 @@ public struct GoogleGeocoder: Geocoder {
         let results: [Result]?
     }
 
-    public func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
+    func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
         let data = try await session.geocodingData(for: makeRequest(for: postalAddress))
         return try Self.parse(data)
     }

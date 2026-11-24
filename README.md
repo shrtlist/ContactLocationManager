@@ -96,18 +96,11 @@ await fetcher.start(maxRequests: isSubscribed ? nil : 20)
 
 `await fetcher.reset()` clears the sync token and the stored locations, sets the request count back to zero, and geocodes every contact again. Because the count starts over, a user under a cap gets the full allowance again.
 
-### Using the geocoders on their own
+### Custom geocoders
 
-`MapKitGeocoder`, `MapsiGeocoder`, `GoogleGeocoder` and `FailoverGeocoder` are public and conform to the `Geocoder` protocol, so you can geocode an address without the rest of the package:
+The providers (MapKit, Google, Mapsi) and the failover between them are internal. The only public pieces are the `Geocoder` protocol and `GeocodingError`. `coordinate(for:)` returns `nil` for no match and throws a `GeocodingError` (`rateLimited`, `requestLimitReached`, `unavailable`, `unauthorized`, `invalidRequest` or `cancelled`), declared as typed throws. Internally, the failover tries every provider on every error except `invalidRequest`, and skips a provider for 60 seconds after it reports `rateLimited`.
 
-```swift
-let geocoder = FailoverGeocoder(providers: [MapKitGeocoder(), MapsiGeocoder(apiKey: key)])
-let coordinate = try await geocoder.coordinate(for: postalAddress)  // nil if no match
-```
-
-`coordinate(for:)` throws a `GeocodingError` (`rateLimited`, `requestLimitReached`, `unavailable`, `unauthorized`, `invalidRequest` or `cancelled`), declared as typed throws. `FailoverGeocoder` fails over on every error except `invalidRequest`, and skips a provider for 60 seconds after it reports `rateLimited`.
-
-To make the fetcher use your own geocoder, for example a mock in tests, pass anything that conforms to `Geocoder` to `configure` instead of keys:
+To make the fetcher use your own geocoder instead, for example a mock in tests, pass anything that conforms to `Geocoder` to `configure` instead of keys:
 
 ```swift
 ContactHistoryFetcher.configure(geocoder: MyGeocoder())

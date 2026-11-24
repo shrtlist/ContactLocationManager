@@ -98,13 +98,15 @@ await fetcher.start(maxRequests: isSubscribed ? nil : 20)
 
 ### Custom geocoders
 
-The providers (MapKit, Google, Mapsi) and the failover between them are internal. The only public pieces are the `Geocoder` protocol and `GeocodingError`. `coordinate(for:)` returns `nil` for no match and throws a `GeocodingError` (`rateLimited`, `requestLimitReached`, `unavailable`, `unauthorized`, `invalidRequest` or `cancelled`), declared as typed throws. Internally, the failover tries every provider on every error except `invalidRequest`, and skips a provider for 60 seconds after it reports `rateLimited`.
+The providers (MapKit, Google, Mapsi) and the failover between them are internal. The only public pieces are the `Geocoder` protocol and `GeocodingError`. `coordinate(for:)` returns `nil` for no match and throws a `GeocodingError` (`rateLimited`, `requestLimitReached`, `unavailable`, `unauthorized`, `invalidRequest`, `cancelled` or `offline`), declared as typed throws. Internally, the failover tries every provider on every error except `invalidRequest` and `offline`, and skips a provider for 60 seconds after it reports `rateLimited`.
 
 To make the fetcher use your own geocoder instead, for example a mock in tests, pass anything that conforms to `Geocoder` to `configure` instead of keys:
 
 ```swift
 ContactHistoryFetcher.configure(geocoder: MyGeocoder())
 ```
+
+To change the geocoder after `configure(...)`, call `await fetcher.setGeocoder(_:)` with your own, or `await fetcher.setGeocoder(mapsiAPIKey:googleAPIKey:includesMapKit:)` for the built-in providers. It applies from the next request on; the request count and limit carry over. Both `configure` and `setGeocoder` take `includesMapKit: false` to leave MapKit out, for example to test another provider alone.
 
 ## How it works
 
@@ -117,9 +119,9 @@ CNContactStore's change-history enumerator can't be called from Swift, so a smal
 
 ## Example app
 
-`Example/ContactLocationManagerExample.xcodeproj` is a small SwiftUI app for trying the package without a host app. It uses the package from this checkout, so local changes are picked up without pushing. It asks for Contacts access, runs the sync, and lists each location's name, address and coordinate. It also shows how many contacts and addresses are in the Contacts database, and lets you:
+`Example/ContactLocationManagerExample.xcodeproj` is a small SwiftUI app for trying the package without a host app. It uses the package from this checkout, so local changes are picked up without pushing. It asks for Contacts access, runs the sync, and lists each location's name, address and coordinate. It also shows how many contacts and addresses are in the Contacts database, lists the addresses no provider could find so you can correct them, and lets you:
 
-- turn the Mapsi and Google geocoders on and off (MapKit is always tried first),
+- turn the MapKit, Mapsi and Google geocoders on and off (MapKit can be turned off only while another provider is on),
 - switch to a mock geocoder that returns a random coordinate for each address, for when there's no network,
 - set a maximum number of requests,
 - reset, which clears the stored locations and geocodes every contact again.

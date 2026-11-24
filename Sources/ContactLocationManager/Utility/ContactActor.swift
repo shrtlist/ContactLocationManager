@@ -31,8 +31,8 @@ struct ContactKeys: @unchecked Sendable {
 actor ContactActor {
     private let geocoder: any Geocoder
     private let contactKeys: ContactKeys
-    /// Looks up contacts by identifier for `retryPending()`. Tests replace it, since the contact store
-    /// can't return contacts that were never saved.
+    /// Looks up contacts by identifier, with their postal addresses. Tests replace it, since the contact
+    /// store can't return contacts that were never saved.
     private let loadContacts: @Sendable (Set<String>, ContactKeys) throws -> [String: CNContact]
 
     init(geocoder: any Geocoder, contactKeys: ContactKeys,
@@ -46,20 +46,13 @@ actor ContactActor {
     func fetchAll() async throws -> [ContactLocationAnnotation] {
         let contactLocationSnapshots = await SkopelosClient.shared.read { context in
             ContactLocation.SK_all(context).map {
-                ContactLocationSnapshot(contactId: $0.contactId, latitude: $0.latitude, longitude: $0.longitude, postalAddressId: $0.postalAddressId, )
+                ContactLocationSnapshot(contactId: $0.contactId, latitude: $0.latitude, longitude: $0.longitude, postalAddressId: $0.postalAddressId)
             }
         }
 
         guard !contactLocationSnapshots.isEmpty else { return [] }
 
-        let fetchRequest = CNContactFetchRequest(keysToFetch: contactKeys.descriptors)
-        fetchRequest.predicate = CNContact.predicateForContacts(withIdentifiers: contactLocationSnapshots.map(\.contactId))
-
-        var contactsById = [String: CNContact]()
-
-        try CNContactStore().enumerateContacts(with: fetchRequest) { (contact, stopPointer) in
-            contactsById[contact.identifier] = contact
-        }
+        let contactsById = try loadContacts(Set(contactLocationSnapshots.map(\.contactId)), contactKeys)
 
         return contactLocationSnapshots.compactMap { contactLocationSnapshot in
             guard let contact = contactsById[contactLocationSnapshot.contactId],
@@ -78,14 +71,8 @@ actor ContactActor {
 
         guard !failures.isEmpty else { return [] }
 
-        let fetchRequest = CNContactFetchRequest(keysToFetch: contactKeys.descriptors + extraKeys.descriptors)
-        fetchRequest.predicate = CNContact.predicateForContacts(withIdentifiers: failures.map(\.contactId))
-
-        var contactsById = [String: CNContact]()
-
-        try CNContactStore().enumerateContacts(with: fetchRequest) { (contact, stopPointer) in
-            contactsById[contact.identifier] = contact
-        }
+        let keys = ContactKeys(contactKeys.descriptors + extraKeys.descriptors)
+        let contactsById = try loadContacts(Set(failures.map(\.contactId)), keys)
 
         return failures.compactMap { failure in
             guard let contact = contactsById[failure.contactId],
@@ -225,7 +212,7 @@ actor ContactActor {
         let fetchRequest = CNContactFetchRequest(keysToFetch: keys.descriptors + [CNContactPostalAddressesKey as CNKeyDescriptor])
         fetchRequest.predicate = CNContact.predicateForContacts(withIdentifiers: Array(identifiers))
         var contactsById = [String: CNContact]()
-        try CNContactStore().enumerateContacts(with: fetchRequest) { (contact, stopPointer) in
+        try CNContactStore().enumerateContacts(with: fetchRequest) { contact, _ in
             contactsById[contact.identifier] = contact
         }
         return contactsById

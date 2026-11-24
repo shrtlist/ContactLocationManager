@@ -12,8 +12,6 @@
 @preconcurrency import Contacts
 import ContactsChangeHistory
 import ContactsUI
-import CoreLocation
-import Network
 import Observation
 import OSLog
 import UIKit

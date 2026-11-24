@@ -316,6 +316,8 @@ public final class ContactHistoryFetcher {
             do {
                 try await interruptible { [contactActor] () async throws(GeocodingError) in try await contactActor.apply(contactHistoryChange) }
             } catch {
+                // Cancelled by `reset()`: what is stored is about to be cleared, so it isn't published.
+                guard !startOver else { return }
                 retryWhenActive = true
                 if error == .rateLimited { stopForRateLimit() }
                 await loadContactLocationAnnotations()

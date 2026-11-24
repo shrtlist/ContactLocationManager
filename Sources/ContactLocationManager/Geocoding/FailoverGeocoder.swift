@@ -6,15 +6,15 @@
 @preconcurrency import Contacts
 import CoreLocation
 
-/// How long a provider that reports rate limiting is skipped. The fetcher waits this long before trying again.
+/// How long a provider that reports rate limiting is skipped.
 let providerCooldown: Duration = .seconds(60)
 
 /// Tries each provider in order and returns the first coordinate found.
 ///
 /// Fails over on no-match and on recoverable errors, but not on `.invalidRequest` or `.offline`.
 /// A provider that reports `.rateLimited` is skipped for `cooldown`, measured on `clock`.
-/// When every provider is cooling down, waits for the earliest cooldown to end and tries again,
-/// rather than reporting no match for an address nobody looked up.
+/// When every provider is cooling down, waits for the earliest cooldown to end and tries again.
+/// When only some are, and the others found no match, throws `.unavailable` so the address is asked again later.
 /// Stops without trying further providers once the calling task is cancelled.
 actor FailoverGeocoder<C: Clock>: Geocoder where C.Duration == Duration {
     private let providers: [any Geocoder]
@@ -31,15 +31,9 @@ actor FailoverGeocoder<C: Clock>: Geocoder where C.Duration == Duration {
     func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
         while true {
             var lastError: GeocodingError?
-            var skipped = 0
-            var earliestCooldownEnd: C.Instant?
 
             for (index, provider) in providers.enumerated() {
-                if let until = cooldownUntil[index], until > clock.now {
-                    skipped += 1
-                    if earliestCooldownEnd.map({ until < $0 }) ?? true { earliestCooldownEnd = until }
-                    continue
-                }
+                if let until = cooldownUntil[index], until > clock.now { continue }
 
                 do throws(GeocodingError) {
                     if let coordinate = try await provider.coordinate(for: postalAddress) {
@@ -60,13 +54,17 @@ actor FailoverGeocoder<C: Clock>: Geocoder where C.Duration == Duration {
                 }
             }
 
-            if let lastError { throw lastError }
+            if let lastError, lastError != .rateLimited { throw lastError }
 
-            // Every provider was skipped, so none was asked: wait for the first to come back.
-            guard skipped == providers.count, let earliestCooldownEnd else { return nil }
+            let now = clock.now
+            let cooldownEnds = cooldownUntil.values.filter { $0 > now }
+            guard cooldownEnds.count == providers.count, let earliest = cooldownEnds.min() else {
+                if lastError != nil { throw .unavailable }
+                return nil
+            }
 
             do {
-                try await clock.sleep(until: earliestCooldownEnd, tolerance: nil)
+                try await clock.sleep(until: earliest, tolerance: nil)
             } catch {
                 throw .cancelled
             }

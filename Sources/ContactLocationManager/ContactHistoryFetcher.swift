@@ -41,8 +41,8 @@ public final class ContactHistoryFetcher {
     @ObservationIgnored private var isFetching = false
     @ObservationIgnored private var contactChangeObservation: Task<Void, Never>?
     @ObservationIgnored private var foregroundObservation: Task<Void, Never>?
-    /// Waits out a provider's cooldown, then syncs again. At most one is pending.
-    @ObservationIgnored private var cooldownRetry: Task<Void, Never>?
+    /// Cancels the lookup in progress.
+    @ObservationIgnored private var cancelLookup: (@Sendable () -> Void)?
     /// True when the last pass stopped early, so the next time the app becomes active it syncs again.
     @ObservationIgnored private var retryWhenActive = false
     @ObservationIgnored private var needsAnotherFetch = false
@@ -171,8 +171,8 @@ public final class ContactHistoryFetcher {
     ///
     /// If the network goes down mid-sync, the sync stops without saving the history token, so the next
     /// sync reads the same changes again. A sync that stopped early, for example offline, tries again by itself
-    /// the next time the app becomes active, and one that stopped because every provider was rate limited tries
-    /// again when the providers' cooldown is over. Both need `start()` to have been called.
+    /// the next time the app becomes active, which needs `start()` to have been called. While every provider
+    /// is rate limited the sync waits where it is, and carries on when their cooldown is over.
     /// Calls that overlap are folded together: a call made during a sync returns at once, and the
     /// running sync reads the changes again straight afterwards.
     func fetchChanges() async {
@@ -199,14 +199,15 @@ public final class ContactHistoryFetcher {
     }
 
     /// Forgets every stored location, starts the request count from zero and geocodes every
-    /// contact again. If a sync is running, it stops after the contact it is on and the new one
-    /// starts then, which may be after this returns.
+    /// contact again. If a sync is running, the lookup it is on is cancelled, also while it waits out a
+    /// provider's cooldown, and the new sync starts then, which may be after this returns.
     /// Until `start()` has been called and access has been granted, nothing is cleared or geocoded:
     /// the reset waits for the first sync.
     public func reset() async {
         await limiter.resetCount()
         hasReachedRequestLimit = false
         startOver = true
+        cancelLookup?()
         await syncIfReady()
     }
 
@@ -282,9 +283,6 @@ public final class ContactHistoryFetcher {
     /// Stops after the current contact once a clear has been asked for, so no more geocoding
     /// requests are spent on work the clear will throw away.
     private func fetchChangesOnce() async {
-        // This pass replaces any retry that is still waiting.
-        cooldownRetry?.cancel()
-        cooldownRetry = nil
         retryWhenActive = false
 
         let startingToken = await contactActor.savedToken()
@@ -311,9 +309,9 @@ public final class ContactHistoryFetcher {
         // Changes are idempotent, so after a pause the same history is simply applied again.
         for (index, change) in changes.enumerated() {
             do {
-                try await contactActor.apply(change)
+                try await interruptible { [contactActor] () async throws(GeocodingError) in try await contactActor.apply(change) }
             } catch {
-                pause(after: error)
+                retryWhenActive = true
                 await loadContactLocationAnnotations()
                 return
             }
@@ -335,37 +333,28 @@ public final class ContactHistoryFetcher {
     }
 
     /// Looks up again the addresses that couldn't be asked earlier. Stops, like a history pass, when the
-    /// device is offline, the providers are rate limited or the task is cancelled.
+    /// device is offline or the task is cancelled.
     private func retryPendingOnce() async {
         do {
-            if try await contactActor.retryPending() {
+            if try await interruptible({ [contactActor] () async throws(GeocodingError) in try await contactActor.retryPending() }) {
                 await loadContactLocationAnnotations()
             }
         } catch {
-            pause(after: error)
+            retryWhenActive = true
             return
         }
         hasReachedRequestLimit = await limiter.hasRefusedRequests
     }
 
-    /// A pass that stopped early syncs again the next time the app becomes active, and after the providers'
-    /// cooldown if they were rate limited.
-    private func pause(after error: GeocodingError) {
-        retryWhenActive = true
-        if error == .rateLimited { retryAfterCooldown() }
-    }
-
-    /// Every provider is rate limited and skipped for `providerCooldown`, so asking sooner would only be refused.
-    private func retryAfterCooldown() {
-        cooldownRetry?.cancel()
-        cooldownRetry = Task { [weak self] in
-            do { try await Task.sleep(for: providerCooldown) } catch { return }
-            guard let self else { return }
-            // Cleared first: the sync below must not cancel the task it is running on.
-            cooldownRetry = nil
-            needsRetryPass = true
-            await fetchChanges()
+    /// Runs a lookup so that `reset()` can cancel it.
+    private func interruptible<T: Sendable>(_ lookup: @escaping @Sendable () async throws(GeocodingError) -> T) async throws(GeocodingError) -> T {
+        let task = Task { () async -> Result<T, GeocodingError> in
+            do throws(GeocodingError) { return .success(try await lookup()) } catch { return .failure(error) }
         }
+        cancelLookup = { task.cancel() }
+        defer { cancelLookup = nil }
+        let result = await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        return try result.get()
     }
 
     /// If the contacts can't be read, keeps what is on the map rather than blanking it.

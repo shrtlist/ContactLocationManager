@@ -42,8 +42,8 @@ actor RequestLimitedGeocoder: Geocoder {
         do throws(GeocodingError) {
             return try await geocoder.coordinate(for: postalAddress)
         } catch {
-            // A request that failed to get an answer doesn't count.
-            count -= 1
+            // A request that failed to get an answer doesn't count. `resetCount()` may have run meanwhile.
+            count = max(count - 1, 0)
             throw error
         }
     }

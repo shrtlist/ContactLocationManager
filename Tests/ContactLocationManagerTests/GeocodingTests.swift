@@ -23,6 +23,18 @@ private final class StubGeocoder: Geocoder {
     }
 }
 
+/// Rate limited the first time it is asked, then finds the address.
+private final class LimitedOnceGeocoder: Geocoder {
+    private let callCount = Mutex(0)
+    var calls: Int { callCount.withLock { $0 } }
+
+    func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
+        let call = callCount.withLock { $0 += 1; return $0 }
+        if call == 1 { throw .rateLimited }
+        return CLLocationCoordinate2D(latitude: 1, longitude: 1)
+    }
+}
+
 private let address = CNPostalAddress()
 
 @Suite struct FailoverGeocoderTests {
@@ -91,19 +103,28 @@ private let address = CNPostalAddress()
         #expect(limited.calls == 2)
     }
 
-    @Test func waitsOutTheCooldownWhenEveryProviderIsCoolingDown() async throws {
-        let limited = StubGeocoder(.failure(.rateLimited))
-        let geocoder = FailoverGeocoder(providers: [limited], cooldown: .seconds(60), clock: ManualClock())
+    @Test func waitsOutTheCooldownWhenEveryProviderIsRateLimited() async throws {
+        let limited = LimitedOnceGeocoder()
+        let clock = ManualClock()
+        let geocoder = FailoverGeocoder(providers: [limited], cooldown: .seconds(60), clock: clock)
 
-        await #expect(throws: GeocodingError.rateLimited) { try await geocoder.coordinate(for: address) }
-        // Cooling down now. It waits, asks again and gets the provider's answer, not "no match".
-        await #expect(throws: GeocodingError.rateLimited) { try await geocoder.coordinate(for: address) }
+        let result = try await geocoder.coordinate(for: address)
+
+        #expect(result?.latitude == 1)
         #expect(limited.calls == 2)
+        #expect(clock.now.offset == .seconds(60))
     }
 
-    @Test func cancelledWhileEveryProviderIsCoolingDown() async {
+    /// Waiting would hold up every other address for as long as the fallback's quota is used up.
+    @Test func aRateLimitedFallbackLeavesTheAddressForLater() async {
+        let providers: [StubGeocoder] = [.init(.noMatch), .init(.failure(.rateLimited))]
+        await #expect(throws: GeocodingError.unavailable) {
+            try await FailoverGeocoder(providers: providers).coordinate(for: address)
+        }
+    }
+
+    @Test func cancelledWhileWaitingOutTheCooldown() async {
         let geocoder = FailoverGeocoder(providers: [StubGeocoder(.failure(.rateLimited))], cooldown: .seconds(60))
-        _ = try? await geocoder.coordinate(for: address)
         let task = Task { try await geocoder.coordinate(for: address) }
         try? await Task.sleep(for: .milliseconds(100))
         task.cancel()

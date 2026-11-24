@@ -6,6 +6,9 @@
 @preconcurrency import Contacts
 import CoreLocation
 
+/// How long a provider that reports rate limiting is skipped. The fetcher waits this long before trying again.
+let providerCooldown: Duration = .seconds(60)
+
 /// Tries each provider in order and returns the first coordinate found.
 ///
 /// Fails over on no-match and on recoverable errors, but not on `.invalidRequest` or `.offline`.
@@ -13,9 +16,6 @@ import CoreLocation
 /// When every provider is cooling down, waits for the earliest cooldown to end and tries again,
 /// rather than reporting no match for an address nobody looked up.
 /// Stops without trying further providers once the calling task is cancelled.
-/// How long a provider that reports rate limiting is skipped. The fetcher waits this long before trying again.
-let providerCooldown: Duration = .seconds(60)
-
 actor FailoverGeocoder<C: Clock>: Geocoder where C.Duration == Duration {
     private let providers: [any Geocoder]
     private let cooldown: Duration

@@ -22,16 +22,7 @@ struct CoreDataRequestCountStore: RequestCountStore {
         let stored = await SkopelosClient.shared.read { context in
             RequestCounter.SK_all(context).first.map { RequestCount(count: Int($0.count), refused: $0.refused) }
         }
-        if let stored { return stored }
-
-        // First launch with the store: carry over the count earlier versions kept in UserDefaults.
-        let defaults = UserDefaults.standard
-        let legacy = RequestCount(count: defaults.integer(forKey: "CNGeocodeRequestCount"),
-                                  refused: defaults.bool(forKey: "CNGeocodeRequestsRefused"))
-        save(legacy)
-        defaults.removeObject(forKey: "CNGeocodeRequestCount")
-        defaults.removeObject(forKey: "CNGeocodeRequestsRefused")
-        return legacy
+        return stored ?? RequestCount()
     }
 
     func save(_ requestCount: RequestCount) {

@@ -35,6 +35,14 @@ import CoreLocation
         #expect(fetcher.fetchBy(copy.postalAddresses[1], contact: copy) === adaWork)
     }
 
+    /// The host's copy may have been fetched with other keys, or after an unrelated edit.
+    @Test func matchesTheSameContactAfterAnUnrelatedEdit() {
+        let edited = ada.mutableCopy() as! CNMutableContact
+        edited.phoneNumbers = [CNLabeledValue(label: CNLabelHome, value: CNPhoneNumber(stringValue: "555-0100"))]
+        #expect(edited != ada)
+        #expect(fetcher.fetchBy(edited.postalAddresses[0], contact: edited) === adaHome)
+    }
+
     @Test func returnsNilWhenTheAddressBelongsToAnotherContact() {
         #expect(fetcher.fetchBy(ada.postalAddresses[0], contact: bob) == nil)
     }

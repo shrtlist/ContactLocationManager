@@ -182,7 +182,9 @@ public final class ContactHistoryFetcher {
     }
 
     public func fetchBy(_ postalAddress: CNLabeledValue<CNPostalAddress>, contact: CNContact) -> ContactLocationAnnotation? {
-        contactLocationAnnotations.first(where: { $0.contact == contact && $0.labeledAddress == postalAddress })
+        contactLocationAnnotations.first {
+            $0.contact.identifier == contact.identifier && $0.labeledAddress.identifier == postalAddress.identifier
+        }
     }
 
     public func setGeocoder(_ geocoder: any Geocoder) async {

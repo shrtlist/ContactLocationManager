@@ -1,7 +1,12 @@
 import Contacts
+import Testing
 import CoreLocation
 import Synchronization
 @testable import ContactLocationManager
+
+/// The suites that read or write the shared on-disk store. They run one after another, because
+/// some of them wipe or count what the others are using. A suite that touches the store goes in here.
+@Suite(.serialized) enum SharedStoreTests {}
 
 extension ContactActor {
     /// Postal address identifiers stored for the contact.

@@ -54,6 +54,35 @@ extension SharedStoreTests {
             await actor.delete(contactIdentifier: contact.identifier)
         }
 
+        // MARK: - A pause part way through a contact
+
+        @Test func goingOfflinePartWayKeepsTheAnswersAlreadyPaidFor() async throws {
+            let geocoder = StopsAfterGeocoder(finding: 2, then: .offline)
+            let actor = actor(geocoder)
+            let contact = makeContact(streets: ["1 Main St", "2 Main St", "3 Main St"])
+
+            await #expect(throws: GeocodingError.offline) { try await actor.apply(.insert(contact)) }
+            #expect(await actor.storedAddressIds(forContactId: contact.identifier).located.count == 2)
+
+            geocoder.recover()
+            try await actor.apply(.insert(contact))
+
+            #expect(geocoder.calls == 4)
+            #expect(await actor.storedAddressIds(forContactId: contact.identifier).located.count == 3)
+            await actor.delete(contactIdentifier: contact.identifier)
+        }
+
+        @Test func aCancelledSyncStoresNothing() async throws {
+            let geocoder = StopsAfterGeocoder(finding: 2, then: .cancelled)
+            let actor = actor(geocoder)
+            let contact = makeContact(streets: ["1 Main St", "2 Main St", "3 Main St"])
+
+            await #expect(throws: GeocodingError.cancelled) { try await actor.apply(.insert(contact)) }
+
+            let stored = await actor.storedAddressIds(forContactId: contact.identifier)
+            #expect(stored.located.isEmpty && stored.pending.isEmpty && stored.failed.isEmpty)
+        }
+
         @Test func onlyTheChangedAddressIsLookedUp() async throws {
             let geocoder = ScriptedGeocoder(.latitude(1))
             let actor = actor(geocoder)

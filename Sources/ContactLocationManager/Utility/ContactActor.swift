@@ -112,11 +112,7 @@ actor ContactActor {
     func update(with contact: CNContact) async throws(GeocodingError) {
         let answered = await answeredFingerprints(forContactId: contact.identifier)
         let needsLookup = contact.postalAddresses.filter { answered[$0.identifier] != $0.value.fingerprint }
-        let lookups = try await geocode(needsLookup)
-
-        SkopelosClient.shared.writeSync { context in
-            Self.store(lookups, for: contact, in: context)
-        }
+        try await lookUpAndStore(needsLookup, for: contact)
     }
     
     /// Looks up again the addresses that couldn't be asked earlier (a provider error, or the host's request limit).
@@ -150,17 +146,12 @@ actor ContactActor {
                 continue
             }
 
-            var lookups: [String: Lookup] = [:]
-            for row in rows {
-                guard let address = contact.postalAddresses.first(where: { $0.identifier == row.postalAddressId }),
-                      address.value.fingerprint == row.fingerprint else { continue }
-                lookups[row.postalAddressId] = try await geocode(address.value)
+            let addresses = contact.postalAddresses.filter { address in
+                rows.contains { $0.postalAddressId == address.identifier && $0.fingerprint == address.value.fingerprint }
             }
-            guard !lookups.isEmpty else { continue }
+            guard !addresses.isEmpty else { continue }
 
-            SkopelosClient.shared.writeSync { context in
-                Self.store(lookups, for: contact, in: context)
-            }
+            let lookups = try await lookUpAndStore(addresses, for: contact)
             if lookups.values.contains(where: { if case .retry = $0 { false } else { true } }) { answeredAny = true }
         }
         return answeredAny
@@ -208,14 +199,29 @@ actor ContactActor {
         case retry
     }
 
-    /// Geocodes the given addresses, keyed by postal address identifier.
-    /// Throws `.offline` or `.cancelled` so the sync can pause.
-    private func geocode(_ addresses: [CNLabeledValue<CNPostalAddress>]) async throws(GeocodingError) -> [String: Lookup] {
+    /// Geocodes the given addresses and stores the answers, keyed by postal address identifier.
+    /// Throws `.offline` or `.cancelled` so the sync can pause. Going offline part way keeps the answers
+    /// already paid for, so the replay asks only for the rest. A cancelled sync stores nothing, because
+    /// `reset()` may be clearing the store at that moment.
+    @discardableResult
+    private func lookUpAndStore(_ addresses: [CNLabeledValue<CNPostalAddress>], for contact: CNContact) async throws(GeocodingError) -> [String: Lookup] {
         var lookups: [String: Lookup] = [:]
-        for address in addresses {
-            lookups[address.identifier] = try await geocode(address.value)
+        do throws(GeocodingError) {
+            for address in addresses {
+                lookups[address.identifier] = try await geocode(address.value)
+            }
+        } catch {
+            if case .offline = error, !lookups.isEmpty { storeNow(lookups, for: contact) }
+            throw error
         }
+        storeNow(lookups, for: contact)
         return lookups
+    }
+
+    private func storeNow(_ lookups: [String: Lookup], for contact: CNContact) {
+        SkopelosClient.shared.writeSync { context in
+            Self.store(lookups, for: contact, in: context)
+        }
     }
 
     /// The fingerprint each of the contact's addresses was last answered for (found or no match), keyed by

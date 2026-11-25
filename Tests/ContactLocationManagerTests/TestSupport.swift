@@ -54,6 +54,26 @@ final class ScriptedGeocoder: Geocoder {
     }
 }
 
+/// Finds a location for the first lookups, then throws `error` until `error` is set to nil.
+final class StopsAfterGeocoder: Geocoder {
+    private let state: Mutex<(remaining: Int, error: GeocodingError?, calls: Int)>
+
+    init(finding count: Int, then error: GeocodingError) { state = Mutex((count, error, 0)) }
+
+    var calls: Int { state.withLock { $0.calls } }
+    func recover() { state.withLock { $0.error = nil } }
+
+    func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
+        let failure = state.withLock { state -> GeocodingError? in
+            state.calls += 1
+            if state.remaining > 0 { state.remaining -= 1; return nil }
+            return state.error
+        }
+        if let failure { throw failure }
+        return CLLocationCoordinate2D(latitude: 5, longitude: 5)
+    }
+}
+
 /// Finds nothing. For tests that never geocode.
 struct NoopGeocoder: Geocoder {
     func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? { nil }

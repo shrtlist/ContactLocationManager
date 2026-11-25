@@ -258,6 +258,22 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
         #expect(annotation(givenName: "Ada", familyName: "Lovelace").title == "Ada Lovelace")
     }
 
+    @Test func titleUsesTheSystemNameFormat() {
+        let contact = CNMutableContact()
+        contact.namePrefix = "Dr."
+        contact.givenName = "Ada"
+        contact.middleName = "King"
+        contact.familyName = "Lovelace"
+        let address = CNMutablePostalAddress()
+        address.street = "1 Main St"
+        contact.postalAddresses = [CNLabeledValue(label: CNLabelHome, value: address as CNPostalAddress)]
+
+        let title = ContactLocationAnnotation(contact: contact, labeledAddress: contact.postalAddresses[0],
+                                              latitude: 1, longitude: 2).title
+
+        #expect(title == "Dr. Ada King Lovelace")
+    }
+
     @Test func titleFallsBackToTheOrganization() {
         #expect(annotation(organization: "Acme").title == "Acme")
     }

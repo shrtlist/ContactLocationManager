@@ -67,7 +67,7 @@ public final class ContactHistoryFetcher {
     /// Geocoding tries MapKit first, then Google, then Mapsi. A provider without a key is left out,
     /// and MapKit is left out when `includesMapKit` is false, for example to test another provider alone.
     /// `contactKeys` are the contact properties each annotation's `contact` has loaded, on top of
-    /// the postal addresses, which are always loaded. The default is the name, thumbnail and type.
+    /// the postal addresses and the name, which are always loaded. The default is the name, thumbnail and type.
     /// They can only be chosen here.
     public static func configure(mapsiAPIKey: String? = nil,
                                  googleAPIKey: String? = nil,

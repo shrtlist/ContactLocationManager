@@ -189,7 +189,10 @@ actor ContactActor {
 
     @Sendable
     private static func loadFromContactStore(identifiers: Set<String>, keys: ContactKeys) throws -> [String: CNContact] {
-        let fetchRequest = CNContactFetchRequest(keysToFetch: keys.descriptors + [CNContactPostalAddressesKey as CNKeyDescriptor])
+        let fetchRequest = CNContactFetchRequest(keysToFetch: keys.descriptors + [
+            CNContactPostalAddressesKey as CNKeyDescriptor,
+            CNContactFormatter.descriptorForRequiredKeys(for: .fullName),
+        ])
         fetchRequest.predicate = CNContact.predicateForContacts(withIdentifiers: Array(identifiers))
         var contactsById = [String: CNContact]()
         try CNContactStore().enumerateContacts(with: fetchRequest) { contact, _ in

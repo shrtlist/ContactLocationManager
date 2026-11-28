@@ -66,8 +66,9 @@ struct ContentView: View {
                     if let progress = fetcher.syncProgress {
                         ProgressView(value: progress)
                     }
-                    LabeledContent("Locations", value: "\(fetcher.contactLocationAnnotations.count)")
+                    LabeledContent("Contact Locations", value: "\(fetcher.contactLocationAnnotations.count)")
                     LabeledContent("Not found", value: "\(fetcher.ungeocodedAddresses.count)")
+                    LabeledContent("Waiting to retry", value: "\(fetcher.pendingAddressCount)")
                     if case .contactsUnreadable(let underlying) = fetcher.syncError {
                         Text("Couldn't read Contacts: \(underlying.localizedDescription)")
                             .foregroundStyle(.red)
@@ -77,7 +78,7 @@ struct ContentView: View {
                     }
                 }
 
-                Section("Locations") {
+                Section("Contact Locations") {
                     ForEach(fetcher.contactLocationAnnotations, id: \.self) { annotation in
                         VStack(alignment: .leading) {
                             Text(annotation.title ?? "No name")

@@ -24,6 +24,7 @@ public final class ContactHistoryFetcher {
     // `internal(set)` so tests can seed annotations without a contact store.
     public internal(set) var contactLocationAnnotations: [ContactLocationAnnotation] = []
     public internal(set) var ungeocodedAddresses: [UngeocodedAddress] = []
+    public internal(set) var pendingAddressCount = 0
     public private(set) var authorizationStatus: CNAuthorizationStatus
 
     /// 0...1 while contacts are being processed, `nil` when idle.
@@ -271,6 +272,7 @@ public final class ContactHistoryFetcher {
                 await contactActor.removeAll()
                 contactLocationAnnotations = []
                 ungeocodedAddresses = []
+                pendingAddressCount = 0
                 continue
             }
             if needsAnotherFetch {
@@ -356,6 +358,7 @@ public final class ContactHistoryFetcher {
         } catch {
             Logger.contacts.error("Contact fetch failed: \(logDescription(of: error), privacy: .public)")
         }
+        pendingAddressCount = await contactActor.pendingCount()
         do {
             ungeocodedAddresses = try await contactActor.fetchFailedAddresses(extraKeys: ContactKeys([CNContactViewController.descriptorForRequiredKeys()]))
         } catch {

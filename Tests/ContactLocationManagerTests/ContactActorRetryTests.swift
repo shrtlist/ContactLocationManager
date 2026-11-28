@@ -54,6 +54,23 @@ extension SharedStoreTests {
             await actor.delete(contactIdentifier: contact.identifier)
         }
 
+        @Test func pendingAddressesAreCounted() async throws {
+            let geocoder = ScriptedGeocoder(.latitude(3))
+            let actor = actor(geocoder)
+            let before = await actor.pendingCount()
+            let contact = makeContact(streets: ["1 Main St", "2 Main St"])
+            book.set(contact, id: contact.identifier)
+            geocoder.answer = .failure(.unavailable)
+            try await actor.apply(.insert(contact))
+            #expect(await actor.pendingCount() == before + 2)
+
+            geocoder.answer = .latitude(3)
+            _ = try await actor.retryPending()
+
+            #expect(await actor.pendingCount() == before)
+            await actor.delete(contactIdentifier: contact.identifier)
+        }
+
         @Test func anAddressThatStillCannotBeAskedStaysPending() async throws {
             let geocoder = ScriptedGeocoder(.latitude(1))
             let actor = actor(geocoder)

@@ -81,6 +81,12 @@ actor ContactActor {
         }
     }
 
+    func pendingCount() async -> Int {
+        await SkopelosClient.shared.read { context in
+            FailedAddress.SK_all(context).filter(\.needsRetry).count
+        }
+    }
+
     /// Throws .offline or .cancelled before touching the store if the change couldn't be geocoded.
     func apply(_ change: ContactHistoryChange) async throws(GeocodingError) {
         switch change {

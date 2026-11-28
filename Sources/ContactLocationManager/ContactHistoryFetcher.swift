@@ -206,7 +206,6 @@ public final class ContactHistoryFetcher {
     /// Until `start()` has been called and access has been granted, nothing is cleared or geocoded:
     /// the reset waits for the first sync.
     public func reset() async {
-        await limiter.resetCount()
         hasReachedRequestLimit = false
         startOver = true
         await syncIfReady()
@@ -268,8 +267,8 @@ public final class ContactHistoryFetcher {
         while startOver || needsAnotherFetch || needsRetryPass {
             if startOver {
                 startOver = false
-                await contactActor.saveToken(nil)
-                await contactActor.removeAll()
+                await contactActor.resetStore()
+                await limiter.discardCount()
                 contactLocationAnnotations = []
                 ungeocodedAddresses = []
                 pendingAddressCount = 0

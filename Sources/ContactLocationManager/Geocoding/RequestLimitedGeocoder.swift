@@ -15,8 +15,6 @@ actor RequestLimitedGeocoder: Geocoder {
     private var maxRequests: Int?
     private var state = RequestCount()
     private var isLoaded = false
-    /// Changes with every `resetCount()`, so a lookup can tell whether a reset happened while it waited.
-    private var generation = 0
 
     init(geocoder: any Geocoder, maxRequests: Int?, store: any RequestCountStore = CoreDataRequestCountStore()) {
         self.geocoder = geocoder
@@ -43,21 +41,12 @@ actor RequestLimitedGeocoder: Geocoder {
         // Reserve before awaiting so overlapping requests can't overshoot the limit.
         state.count += 1
         store.save(state)
-        let reservedIn = generation
         do throws(GeocodingError) {
-            let coordinate = try await geocoder.coordinate(for: postalAddress)
-            if generation != reservedIn {
-                // A reset wiped the reservation while this was in flight, but the request was made.
-                state.count += 1
-                store.save(state)
-            }
-            return coordinate
+            return try await geocoder.coordinate(for: postalAddress)
         } catch {
-            // A request that failed to get an answer doesn't count. After a reset the reservation is already gone.
-            if generation == reservedIn {
-                state.count -= 1
-                store.save(state)
-            }
+            // A request that failed to get an answer doesn't count.
+            state.count -= 1
+            store.save(state)
             throw error
         }
     }
@@ -71,12 +60,11 @@ actor RequestLimitedGeocoder: Geocoder {
         await (geocoder as? any RateLimitClearing)?.clearRateLimits()
     }
 
-    /// Starts counting from zero again.
-    func resetCount() {
-        generation += 1
+    /// Starts counting from zero again, in memory only. The caller clears the stored count, together with
+    /// the rest of what a reset clears, so that all of it is one write.
+    func discardCount() {
         state = RequestCount()
         isLoaded = true
-        store.save(state)
     }
 
     /// Returns true if requests had been refused and the new limit lets them through now,
@@ -93,7 +81,7 @@ actor RequestLimitedGeocoder: Geocoder {
     private func load() async {
         guard !isLoaded else { return }
         let loaded = await store.load()
-        // `resetCount()` may have run while this waited.
+        // `discardCount()` may have run while this waited.
         guard !isLoaded else { return }
         state = loaded
         isLoaded = true

@@ -97,6 +97,15 @@ actor ContactActor {
         }
     }
 
+    func resetStore() {
+        SkopelosClient.shared.writeSync { context in
+            ContactLocation.SK_removeAll(context)
+            FailedAddress.SK_removeAll(context)
+            SyncToken.SK_removeAll(context)
+            RequestCounter.SK_removeAll(context)
+        }
+    }
+
     func removeAll() {
         SkopelosClient.shared.writeSync { context in
             ContactLocation.SK_removeAll(context)

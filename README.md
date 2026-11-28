@@ -135,7 +135,7 @@ To run it on a device, choose your team under Signing & Capabilities.
 
 - **Syncing starts at `start(maxRequests:)`.** Calling `configure(...)` only publishes the locations stored by earlier syncs. `start(maxRequests:)` syncs right away, even with no network connection (a sync that can't geocode pauses and tries again when the app becomes active). Call it once your app knows the network is up if that matters.
 - **Free users can reach paid providers.** The keys you pass apply to every request. If MapKit finds no match or fails, the address goes to Google and Mapsi, and still counts as one request. To keep a tier on MapKit only, don't pass it keys.
-- **`reset()` and `setMaxRequests(_:)` can return before they take effect.** If a sync is running, it stops after the contact it is on; the new sync starts then, which may be after the call returns. `reset()` clears the stored locations at that point; `setMaxRequests(_:)` clears nothing. Otherwise they return once the new sync has finished.
+- **`reset()` and `setMaxRequests(_:)` can return before they take effect.** If a sync is running, it stops after the contact it is on; the new sync starts then, which may be after the call returns. `reset()` clears the stored locations, the sync token and the request count, in one write, at that point; `setMaxRequests(_:)` clears nothing. Otherwise they return once the new sync has finished.
 - **Limited Contacts access** (`.limited`) is supported in code but has not been tested.
 - **No cache.** Every address is geocoded again after a `reset()`.
 

@@ -54,6 +54,25 @@ extension SharedStoreTests {
             await actor.delete(contactIdentifier: contact.identifier)
         }
 
+        // MARK: - Reset
+
+        @Test func resetStoreClearsEverythingAResetStartsOverFrom() async throws {
+            let actor = actor(ScriptedGeocoder(.latitude(7)))
+            let contact = makeContact(streets: ["1 Main St"])
+            try await actor.apply(.insert(contact))
+            await actor.saveToken(Data([1]))
+            let counter = CoreDataRequestCountStore()
+            counter.save(RequestCount(count: 3, refused: true))
+
+            await actor.resetStore()
+
+            let stored = await actor.storedAddressIds(forContactId: contact.identifier)
+            #expect(stored.located.isEmpty && stored.failed.isEmpty && stored.pending.isEmpty)
+            #expect(await actor.savedToken() == nil)
+            #expect(await counter.load().count == 0)
+            #expect(await !counter.load().refused)
+        }
+
         // MARK: - A pause part way through a contact
 
         @Test func goingOfflinePartWayKeepsTheAnswersAlreadyPaidFor() async throws {

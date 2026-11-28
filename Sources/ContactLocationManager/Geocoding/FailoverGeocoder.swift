@@ -6,76 +6,54 @@
 @preconcurrency import Contacts
 import CoreLocation
 
-/// How long a provider that reports rate limiting is skipped. The fetcher waits this long before trying again.
-let providerCooldown: Duration = .seconds(60)
+/// A geocoder that stops asking providers which report rate limiting.
+protocol RateLimitClearing: Geocoder {
+    /// Asks every provider again from the next lookup on.
+    func clearRateLimits() async
+}
 
 /// Tries each provider in order and returns the first coordinate found.
 ///
 /// Fails over on no-match and on recoverable errors, but not on `.invalidRequest` or `.offline`.
-/// A provider that reports `.rateLimited` is skipped for `cooldown`, measured on `clock`.
-/// When every provider is cooling down, waits for the earliest cooldown to end and tries again,
-/// rather than reporting no match for an address nobody looked up.
+/// A provider that reports `.rateLimited` isn't asked again until `clearRateLimits()`, which the fetcher
+/// calls when a sync starts. While one is left out, an address the others can't find throws `.rateLimited`
+/// rather than counting as no match, so it is asked again later.
 /// Stops without trying further providers once the calling task is cancelled.
-actor FailoverGeocoder<C: Clock>: Geocoder where C.Duration == Duration {
+actor FailoverGeocoder: RateLimitClearing {
     private let providers: [any Geocoder]
-    private let cooldown: Duration
-    private let clock: C
-    private var cooldownUntil: [Int: C.Instant] = [:]
+    private var rateLimited: Set<Int> = []
 
-    init(providers: [any Geocoder], cooldown: Duration = providerCooldown, clock: C) {
+    init(providers: [any Geocoder]) {
         self.providers = providers
-        self.cooldown = cooldown
-        self.clock = clock
+    }
+
+    func clearRateLimits() {
+        rateLimited = []
     }
 
     func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
-        while true {
-            var lastError: GeocodingError?
-            var skipped = 0
-            var earliestCooldownEnd: C.Instant?
+        var lastError: GeocodingError?
 
-            for (index, provider) in providers.enumerated() {
-                if let until = cooldownUntil[index], until > clock.now {
-                    skipped += 1
-                    if earliestCooldownEnd.map({ until < $0 }) ?? true { earliestCooldownEnd = until }
-                    continue
+        for (index, provider) in providers.enumerated() where !rateLimited.contains(index) {
+            do throws(GeocodingError) {
+                if let coordinate = try await provider.coordinate(for: postalAddress) {
+                    return coordinate
                 }
-
-                do throws(GeocodingError) {
-                    if let coordinate = try await provider.coordinate(for: postalAddress) {
-                        return coordinate
-                    }
-                } catch .invalidRequest {
-                    throw .invalidRequest
-                } catch .offline {
-                    throw .offline
-                } catch {
-                    // Providers report a cancelled request as an ordinary failure, so ask the task
-                    // itself. Otherwise a torn-down sync would carry on to the next, possibly billed, provider.
-                    if Task.isCancelled { throw .cancelled }
-                    lastError = error
-                    if error == .rateLimited {
-                        cooldownUntil[index] = clock.now.advanced(by: cooldown)
-                    }
-                }
-            }
-
-            if let lastError { throw lastError }
-
-            // Every provider was skipped, so none was asked: wait for the first to come back.
-            guard skipped == providers.count, let earliestCooldownEnd else { return nil }
-
-            do {
-                try await clock.sleep(until: earliestCooldownEnd, tolerance: nil)
+            } catch .invalidRequest {
+                throw .invalidRequest
+            } catch .offline {
+                throw .offline
             } catch {
-                throw .cancelled
+                // Providers report a cancelled request as an ordinary failure, so ask the task
+                // itself. Otherwise a torn-down sync would carry on to the next, possibly billed, provider.
+                if Task.isCancelled { throw .cancelled }
+                lastError = error
+                if error == .rateLimited { rateLimited.insert(index) }
             }
         }
-    }
-}
 
-extension FailoverGeocoder where C == ContinuousClock {
-    init(providers: [any Geocoder], cooldown: Duration = providerCooldown) {
-        self.init(providers: providers, cooldown: cooldown, clock: ContinuousClock())
+        if let lastError { throw lastError }
+        if !rateLimited.isEmpty { throw .rateLimited }
+        return nil
     }
 }

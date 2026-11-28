@@ -77,61 +77,38 @@ private let address = CNPostalAddress()
         }
     }
 
-    @Test func rateLimitedProviderIsSkippedUntilCooldownEnds() async throws {
+    @Test func rateLimitedProviderIsLeftOutUntilCleared() async throws {
         let limited = StubGeocoder(.failure(.rateLimited)), backup = StubGeocoder(.coordinate(2))
-        let clock = ManualClock()
-        let geocoder = FailoverGeocoder(providers: [limited, backup], cooldown: .seconds(60), clock: clock)
+        let geocoder = FailoverGeocoder(providers: [limited, backup])
 
         _ = try await geocoder.coordinate(for: address)
         _ = try await geocoder.coordinate(for: address)
         #expect(limited.calls == 1)
 
-        clock.advance(by: .seconds(61))
+        await geocoder.clearRateLimits()
         _ = try await geocoder.coordinate(for: address)
         #expect(limited.calls == 2)
     }
 
-    @Test func waitsOutTheCooldownWhenEveryProviderIsCoolingDown() async throws {
+    @Test func aRateLimitedOnlyProviderIsNotAskedAgainAndNothingWaits() async {
         let limited = StubGeocoder(.failure(.rateLimited))
-        let geocoder = FailoverGeocoder(providers: [limited], cooldown: .seconds(60), clock: ManualClock())
+        let geocoder = FailoverGeocoder(providers: [limited])
 
-        await #expect(throws: GeocodingError.rateLimited) { try await geocoder.coordinate(for: address) }
-        // Cooling down now. It waits, asks again and gets the provider's answer, not "no match".
-        await #expect(throws: GeocodingError.rateLimited) { try await geocoder.coordinate(for: address) }
-        #expect(limited.calls == 2)
+        for _ in 0..<3 {
+            await #expect(throws: GeocodingError.rateLimited) { try await geocoder.coordinate(for: address) }
+        }
+
+        #expect(limited.calls == 1)
     }
 
-    @Test func cancelledWhileEveryProviderIsCoolingDown() async {
-        let geocoder = FailoverGeocoder(providers: [StubGeocoder(.failure(.rateLimited))], cooldown: .seconds(60))
-        _ = try? await geocoder.coordinate(for: address)
-        let task = Task { try await geocoder.coordinate(for: address) }
-        try? await Task.sleep(for: .milliseconds(100))
-        task.cancel()
-        await #expect(throws: GeocodingError.cancelled) { try await task.value }
-    }
-}
+    /// The provider that is left out might have found it, so the address must not be stored as a no match.
+    @Test func noMatchWhileAnotherProviderIsLeftOutLeavesTheAddressForLater() async {
+        let limited = StubGeocoder(.failure(.rateLimited))
+        let geocoder = FailoverGeocoder(providers: [StubGeocoder(.noMatch), limited])
 
-private struct ManualInstant: InstantProtocol {
-    var offset: Duration
-
-    func advanced(by duration: Duration) -> ManualInstant { ManualInstant(offset: offset + duration) }
-    func duration(to other: ManualInstant) -> Duration { other.offset - offset }
-    static func < (lhs: ManualInstant, rhs: ManualInstant) -> Bool { lhs.offset < rhs.offset }
-}
-
-private final class ManualClock: Clock, Sendable {
-    typealias Duration = Swift.Duration
-    private let elapsed = Mutex(Duration.zero)
-
-    var now: ManualInstant { ManualInstant(offset: elapsed.withLock { $0 }) }
-    var minimumResolution: Duration { .zero }
-
-    func advance(by duration: Duration) { elapsed.withLock { $0 += duration } }
-
-    /// Time only passes when someone sleeps, so a waiting geocoder wakes at its deadline.
-    func sleep(until deadline: ManualInstant, tolerance: Duration?) async throws {
-        try Task.checkCancellation()
-        elapsed.withLock { $0 = max($0, deadline.offset) }
+        await #expect(throws: GeocodingError.rateLimited) { try await geocoder.coordinate(for: address) }
+        await #expect(throws: GeocodingError.rateLimited) { try await geocoder.coordinate(for: address) }
+        #expect(limited.calls == 1)
     }
 }
 
@@ -209,14 +186,9 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
 }
 
 @Suite struct RequestLimitedGeocoderTests {
-    private func makeDefaults() -> UserDefaults {
-        let defaults = UserDefaults(suiteName: UUID().uuidString)!
-        return defaults
-    }
-
     @Test func refusesOnceTheLimitIsReached() async throws {
         let base = StubGeocoder(.coordinate(1))
-        let geocoder = RequestLimitedGeocoder(geocoder: base, maxRequests: 2, defaults: makeDefaults())
+        let geocoder = RequestLimitedGeocoder(geocoder: base, maxRequests: 2, store: InMemoryRequestCountStore())
         _ = try await geocoder.coordinate(for: address)
         _ = try await geocoder.coordinate(for: address)
         await #expect(throws: GeocodingError.requestLimitReached) { try await geocoder.coordinate(for: address) }
@@ -225,13 +197,13 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
     }
 
     @Test func noLimitMeansNoRefusals() async throws {
-        let geocoder = RequestLimitedGeocoder(geocoder: StubGeocoder(.coordinate(1)), maxRequests: nil, defaults: makeDefaults())
+        let geocoder = RequestLimitedGeocoder(geocoder: StubGeocoder(.coordinate(1)), maxRequests: nil, store: InMemoryRequestCountStore())
         for _ in 0..<50 { _ = try await geocoder.coordinate(for: address) }
         #expect(await !geocoder.hasRefusedRequests)
     }
 
     @Test func failedRequestsDontCount() async throws {
-        let geocoder = RequestLimitedGeocoder(geocoder: StubGeocoder(.failure(.unavailable)), maxRequests: 1, defaults: makeDefaults())
+        let geocoder = RequestLimitedGeocoder(geocoder: StubGeocoder(.failure(.unavailable)), maxRequests: 1, store: InMemoryRequestCountStore())
         for _ in 0..<3 {
             await #expect(throws: GeocodingError.unavailable) { try await geocoder.coordinate(for: address) }
         }
@@ -239,7 +211,7 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
     }
 
     @Test func raisingTheLimitAfterARefusalAsksForAResync() async throws {
-        let geocoder = RequestLimitedGeocoder(geocoder: StubGeocoder(.coordinate(1)), maxRequests: 1, defaults: makeDefaults())
+        let geocoder = RequestLimitedGeocoder(geocoder: StubGeocoder(.coordinate(1)), maxRequests: 1, store: InMemoryRequestCountStore())
         _ = try await geocoder.coordinate(for: address)
         _ = try? await geocoder.coordinate(for: address)
 
@@ -250,7 +222,7 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
     }
 
     @Test func resetCountAllowsRequestsAgain() async throws {
-        let geocoder = RequestLimitedGeocoder(geocoder: StubGeocoder(.coordinate(1)), maxRequests: 1, defaults: makeDefaults())
+        let geocoder = RequestLimitedGeocoder(geocoder: StubGeocoder(.coordinate(1)), maxRequests: 1, store: InMemoryRequestCountStore())
         _ = try await geocoder.coordinate(for: address)
         _ = try? await geocoder.coordinate(for: address)
 
@@ -260,7 +232,7 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
     }
 
     @Test func raisingTheLimitWithoutARefusalNeedsNoResync() async throws {
-        let geocoder = RequestLimitedGeocoder(geocoder: StubGeocoder(.coordinate(1)), maxRequests: 5, defaults: makeDefaults())
+        let geocoder = RequestLimitedGeocoder(geocoder: StubGeocoder(.coordinate(1)), maxRequests: 5, store: InMemoryRequestCountStore())
         _ = try await geocoder.coordinate(for: address)
         #expect(await !geocoder.setMaxRequests(nil))
     }
@@ -284,6 +256,22 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
 
     @Test func titleIsThePersonsName() {
         #expect(annotation(givenName: "Ada", familyName: "Lovelace").title == "Ada Lovelace")
+    }
+
+    @Test func titleUsesTheSystemNameFormat() {
+        let contact = CNMutableContact()
+        contact.namePrefix = "Dr."
+        contact.givenName = "Ada"
+        contact.middleName = "King"
+        contact.familyName = "Lovelace"
+        let address = CNMutablePostalAddress()
+        address.street = "1 Main St"
+        contact.postalAddresses = [CNLabeledValue(label: CNLabelHome, value: address as CNPostalAddress)]
+
+        let title = ContactLocationAnnotation(contact: contact, labeledAddress: contact.postalAddresses[0],
+                                              latitude: 1, longitude: 2).title
+
+        #expect(title == "Dr. Ada King Lovelace")
     }
 
     @Test func titleFallsBackToTheOrganization() {

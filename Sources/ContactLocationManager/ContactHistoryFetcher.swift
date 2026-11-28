@@ -24,6 +24,7 @@ public final class ContactHistoryFetcher {
     // `internal(set)` so tests can seed annotations without a contact store.
     public internal(set) var contactLocationAnnotations: [ContactLocationAnnotation] = []
     public internal(set) var ungeocodedAddresses: [UngeocodedAddress] = []
+    public internal(set) var pendingAddressCount = 0
     public private(set) var authorizationStatus: CNAuthorizationStatus
 
     /// 0...1 while contacts are being processed, `nil` when idle.
@@ -41,8 +42,6 @@ public final class ContactHistoryFetcher {
     @ObservationIgnored private var isFetching = false
     @ObservationIgnored private var contactChangeObservation: Task<Void, Never>?
     @ObservationIgnored private var foregroundObservation: Task<Void, Never>?
-    /// Waits out a provider's cooldown, then syncs again. At most one is pending.
-    @ObservationIgnored private var cooldownRetry: Task<Void, Never>?
     /// True when the last pass stopped early, so the next time the app becomes active it syncs again.
     @ObservationIgnored private var retryWhenActive = false
     @ObservationIgnored private var needsAnotherFetch = false
@@ -69,7 +68,7 @@ public final class ContactHistoryFetcher {
     /// Geocoding tries MapKit first, then Google, then Mapsi. A provider without a key is left out,
     /// and MapKit is left out when `includesMapKit` is false, for example to test another provider alone.
     /// `contactKeys` are the contact properties each annotation's `contact` has loaded, on top of
-    /// the postal addresses, which are always loaded. The default is the name, thumbnail and type.
+    /// the postal addresses and the name, which are always loaded. The default is the name, thumbnail and type.
     /// They can only be chosen here.
     public static func configure(mapsiAPIKey: String? = nil,
                                  googleAPIKey: String? = nil,
@@ -171,8 +170,9 @@ public final class ContactHistoryFetcher {
     ///
     /// If the network goes down mid-sync, the sync stops without saving the history token, so the next
     /// sync reads the same changes again. A sync that stopped early, for example offline, tries again by itself
-    /// the next time the app becomes active, and one that stopped because every provider was rate limited tries
-    /// again when the providers' cooldown is over. Both need `start()` to have been called.
+    /// the next time the app becomes active, which needs `start()` to have been called. A rate limited provider
+    /// doesn't stop it: the provider is left out for the rest of the sync, and the addresses nobody could
+    /// answer are looked up again later, like any that couldn't be asked.
     /// Calls that overlap are folded together: a call made during a sync returns at once, and the
     /// running sync reads the changes again straight afterwards.
     func fetchChanges() async {
@@ -183,7 +183,9 @@ public final class ContactHistoryFetcher {
     }
 
     public func fetchBy(_ postalAddress: CNLabeledValue<CNPostalAddress>, contact: CNContact) -> ContactLocationAnnotation? {
-        contactLocationAnnotations.first(where: { $0.contact == contact && $0.labeledAddress == postalAddress })
+        contactLocationAnnotations.first {
+            $0.contact.identifier == contact.identifier && $0.labeledAddress.identifier == postalAddress.identifier
+        }
     }
 
     public func setGeocoder(_ geocoder: any Geocoder) async {
@@ -260,6 +262,9 @@ public final class ContactHistoryFetcher {
         isFetching = true
         defer { isFetching = false }
 
+        // A provider that was rate limited during the last sync is asked again in this one.
+        await limiter.clearRateLimits()
+
         while startOver || needsAnotherFetch || needsRetryPass {
             if startOver {
                 startOver = false
@@ -267,6 +272,7 @@ public final class ContactHistoryFetcher {
                 await contactActor.removeAll()
                 contactLocationAnnotations = []
                 ungeocodedAddresses = []
+                pendingAddressCount = 0
                 continue
             }
             if needsAnotherFetch {
@@ -282,17 +288,14 @@ public final class ContactHistoryFetcher {
     /// Stops after the current contact once a clear has been asked for, so no more geocoding
     /// requests are spent on work the clear will throw away.
     private func fetchChangesOnce() async {
-        // This pass replaces any retry that is still waiting.
-        cooldownRetry?.cancel()
-        cooldownRetry = nil
         retryWhenActive = false
 
         let startingToken = await contactActor.savedToken()
         let token: Data?
-        let changes: [ContactHistoryChange]
+        let contactHistoryChanges: [ContactHistoryChange]
 
         do {
-            (token, changes) = try await Self.fetchHistory(startingToken: startingToken)
+            (token, contactHistoryChanges) = try await Self.fetchHistory(startingToken: startingToken)
         } catch {
             Logger.contacts.error("Contacts history fetch failed: \(logDescription(of: error), privacy: .public)")
             if startingToken != nil {
@@ -309,22 +312,22 @@ public final class ContactHistoryFetcher {
         defer { syncProgress = nil }
 
         // Changes are idempotent, so after a pause the same history is simply applied again.
-        for (index, change) in changes.enumerated() {
+        for (index, contactHistoryChange) in contactHistoryChanges.enumerated() {
             do {
-                try await contactActor.apply(change)
+                try await contactActor.apply(contactHistoryChange)
             } catch {
-                pause(after: error)
+                retryWhenActive = true
                 await loadContactLocationAnnotations()
                 return
             }
-            syncProgress = Double(index + 1) / Double(changes.count)
+            syncProgress = Double(index + 1) / Double(contactHistoryChanges.count)
             guard !startOver else { return }
         }
 
         await contactActor.saveToken(token)
 
         // When nothing has been published yet, the stored list is published.
-        if !changes.isEmpty || contactLocationAnnotations.isEmpty {
+        if !contactHistoryChanges.isEmpty || contactLocationAnnotations.isEmpty {
             await loadContactLocationAnnotations()
         }
         let hasRefusedRequests = await limiter.hasRefusedRequests
@@ -335,37 +338,17 @@ public final class ContactHistoryFetcher {
     }
 
     /// Looks up again the addresses that couldn't be asked earlier. Stops, like a history pass, when the
-    /// device is offline, the providers are rate limited or the task is cancelled.
+    /// device is offline or the task is cancelled.
     private func retryPendingOnce() async {
         do {
             if try await contactActor.retryPending() {
                 await loadContactLocationAnnotations()
             }
         } catch {
-            pause(after: error)
+            retryWhenActive = true
             return
         }
         hasReachedRequestLimit = await limiter.hasRefusedRequests
-    }
-
-    /// A pass that stopped early syncs again the next time the app becomes active, and after the providers'
-    /// cooldown if they were rate limited.
-    private func pause(after error: GeocodingError) {
-        retryWhenActive = true
-        if error == .rateLimited { retryAfterCooldown() }
-    }
-
-    /// Every provider is rate limited and skipped for `providerCooldown`, so asking sooner would only be refused.
-    private func retryAfterCooldown() {
-        cooldownRetry?.cancel()
-        cooldownRetry = Task { [weak self] in
-            do { try await Task.sleep(for: providerCooldown) } catch { return }
-            guard let self else { return }
-            // Cleared first: the sync below must not cancel the task it is running on.
-            cooldownRetry = nil
-            needsRetryPass = true
-            await fetchChanges()
-        }
     }
 
     /// If the contacts can't be read, keeps what is on the map rather than blanking it.
@@ -375,6 +358,7 @@ public final class ContactHistoryFetcher {
         } catch {
             Logger.contacts.error("Contact fetch failed: \(logDescription(of: error), privacy: .public)")
         }
+        pendingAddressCount = await contactActor.pendingCount()
         do {
             ungeocodedAddresses = try await contactActor.fetchFailedAddresses(extraKeys: ContactKeys([CNContactViewController.descriptorForRequiredKeys()]))
         } catch {
@@ -386,12 +370,7 @@ public final class ContactHistoryFetcher {
     private static func fetchHistory(startingToken: Data?) async throws -> (Data?, [ContactHistoryChange]) {
         let fetchHistoryRequest = CNChangeHistoryFetchRequest()
         fetchHistoryRequest.startingToken = startingToken
-
-        // Geocoding needs the postal addresses; the full name is for the host's convenience.
-        fetchHistoryRequest.additionalContactKeyDescriptors = [
-            CNContactFormatter.descriptorForRequiredKeys(for: .fullName),
-            CNContactPostalAddressesKey as CNKeyDescriptor,
-        ]
+        fetchHistoryRequest.additionalContactKeyDescriptors = [CNContactPostalAddressesKey as CNKeyDescriptor]
 
         let wrapper = ContactStoreWrapper(store: CNContactStore())
         let result = try wrapper.changeHistoryFetchResult(fetchHistoryRequest)

@@ -81,7 +81,13 @@ actor ContactActor {
         }
     }
 
-    /// Throws .offline, .rateLimited or .cancelled before touching the store if the change couldn't be geocoded.
+    func pendingCount() async -> Int {
+        await SkopelosClient.shared.read { context in
+            FailedAddress.SK_all(context).filter(\.needsRetry).count
+        }
+    }
+
+    /// Throws .offline or .cancelled before touching the store if the change couldn't be geocoded.
     func apply(_ change: ContactHistoryChange) async throws(GeocodingError) {
         switch change {
         case .removeAll: removeAll()
@@ -112,16 +118,12 @@ actor ContactActor {
     func update(with contact: CNContact) async throws(GeocodingError) {
         let answered = await answeredFingerprints(forContactId: contact.identifier)
         let needsLookup = contact.postalAddresses.filter { answered[$0.identifier] != $0.value.fingerprint }
-        let lookups = try await geocode(needsLookup)
-
-        SkopelosClient.shared.writeSync { context in
-            Self.store(lookups, for: contact, in: context)
-        }
+        try await lookUpAndStore(needsLookup, for: contact)
     }
     
     /// Looks up again the addresses that couldn't be asked earlier (a provider error, or the host's request limit).
     /// Returns true if any of them now has an answer. An address whose text changed since is left to the sync,
-    /// which sees the new text. Throws `.offline`, `.rateLimited` or `.cancelled` so the pass can pause.
+    /// which sees the new text. Throws `.offline` or `.cancelled` so the pass can pause.
     func retryPending() async throws(GeocodingError) -> Bool {
         let pending = await SkopelosClient.shared.read { context in
             FailedAddress.SK_all(context).filter(\.needsRetry).map {
@@ -150,17 +152,12 @@ actor ContactActor {
                 continue
             }
 
-            var lookups: [String: Lookup] = [:]
-            for row in rows {
-                guard let address = contact.postalAddresses.first(where: { $0.identifier == row.postalAddressId }),
-                      address.value.fingerprint == row.fingerprint else { continue }
-                lookups[row.postalAddressId] = try await geocode(address.value)
+            let addresses = contact.postalAddresses.filter { address in
+                rows.contains { $0.postalAddressId == address.identifier && $0.fingerprint == address.value.fingerprint }
             }
-            guard !lookups.isEmpty else { continue }
+            guard !addresses.isEmpty else { continue }
 
-            SkopelosClient.shared.writeSync { context in
-                Self.store(lookups, for: contact, in: context)
-            }
+            let lookups = try await lookUpAndStore(addresses, for: contact)
             if lookups.values.contains(where: { if case .retry = $0 { false } else { true } }) { answeredAny = true }
         }
         return answeredAny
@@ -189,7 +186,10 @@ actor ContactActor {
 
     @Sendable
     private static func loadFromContactStore(identifiers: Set<String>, keys: ContactKeys) throws -> [String: CNContact] {
-        let fetchRequest = CNContactFetchRequest(keysToFetch: keys.descriptors + [CNContactPostalAddressesKey as CNKeyDescriptor])
+        let fetchRequest = CNContactFetchRequest(keysToFetch: keys.descriptors + [
+            CNContactPostalAddressesKey as CNKeyDescriptor,
+            CNContactFormatter.descriptorForRequiredKeys(for: .fullName),
+        ])
         fetchRequest.predicate = CNContact.predicateForContacts(withIdentifiers: Array(identifiers))
         var contactsById = [String: CNContact]()
         try CNContactStore().enumerateContacts(with: fetchRequest) { contact, _ in
@@ -201,18 +201,33 @@ actor ContactActor {
     private enum Lookup {
         case located(CLLocationCoordinate2D)
         case noMatch
-        /// Couldn't be asked: a provider error or the host's request limit. Looked up again by `retryPending()`.
+        /// Couldn't be asked: a provider error, a rate limit or the host's request limit. Looked up again by `retryPending()`.
         case retry
     }
 
-    /// Geocodes the given addresses, keyed by postal address identifier.
-    /// Throws `.offline`, `.rateLimited` or `.cancelled` so the sync can pause.
-    private func geocode(_ addresses: [CNLabeledValue<CNPostalAddress>]) async throws(GeocodingError) -> [String: Lookup] {
+    /// Geocodes the given addresses and stores the answers, keyed by postal address identifier.
+    /// Throws `.offline` or `.cancelled` so the sync can pause. Going offline part way keeps the answers
+    /// already paid for, so the replay asks only for the rest. A cancelled sync stores nothing, because
+    /// `reset()` may be clearing the store at that moment.
+    @discardableResult
+    private func lookUpAndStore(_ addresses: [CNLabeledValue<CNPostalAddress>], for contact: CNContact) async throws(GeocodingError) -> [String: Lookup] {
         var lookups: [String: Lookup] = [:]
-        for address in addresses {
-            lookups[address.identifier] = try await geocode(address.value)
+        do throws(GeocodingError) {
+            for address in addresses {
+                lookups[address.identifier] = try await geocode(address.value)
+            }
+        } catch {
+            if case .offline = error, !lookups.isEmpty { storeNow(lookups, for: contact) }
+            throw error
         }
+        storeNow(lookups, for: contact)
         return lookups
+    }
+
+    private func storeNow(_ lookups: [String: Lookup], for contact: CNContact) {
+        SkopelosClient.shared.writeSync { context in
+            Self.store(lookups, for: contact, in: context)
+        }
     }
 
     /// The fingerprint each of the contact's addresses was last answered for (found or no match), keyed by
@@ -242,12 +257,9 @@ actor ContactActor {
             throw .offline
         } catch .cancelled {
             throw .cancelled
-        } catch .rateLimited {
-            // Every provider is cooling down. The address is looked up again once they are back, not stored as no match.
-            throw .rateLimited
-        } catch .requestLimitReached {
-            // Expected once the host's limit is used up, and every remaining address hits it, so it isn't
-            // logged per address. The fetcher logs it once when the pass ends.
+        } catch .requestLimitReached, .rateLimited {
+            // Expected once the host's limit is used up or a provider is rate limited, and every remaining
+            // address may hit it, so it isn't logged per address.
             return .retry
         } catch .invalidRequest {
             // Every provider rejects the address itself, so it needs correcting, like a no match.

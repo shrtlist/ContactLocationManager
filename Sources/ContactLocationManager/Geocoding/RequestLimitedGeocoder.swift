@@ -30,6 +30,14 @@ actor RequestLimitedGeocoder: Geocoder {
         }
     }
 
+    var isAtRequestLimit: Bool {
+        get async {
+            await load()
+            guard let maxRequests else { return false }
+            return state.count >= maxRequests
+        }
+    }
+
     func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
         await load()
         if let maxRequests, state.count >= maxRequests {

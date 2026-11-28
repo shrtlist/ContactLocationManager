@@ -339,6 +339,10 @@ public final class ContactHistoryFetcher {
     /// Looks up again the addresses that couldn't be asked earlier. Stops, like a history pass, when the
     /// device is offline or the task is cancelled.
     private func retryPendingOnce() async {
+        if await limiter.isAtRequestLimit {
+            hasReachedRequestLimit = await limiter.hasRefusedRequests
+            return
+        }
         do {
             if try await contactActor.retryPending() {
                 await loadContactLocationAnnotations()

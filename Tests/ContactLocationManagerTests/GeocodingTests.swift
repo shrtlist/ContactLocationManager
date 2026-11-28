@@ -196,6 +196,23 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
         #expect(await geocoder.hasRefusedRequests)
     }
 
+    @Test func isAtLimitOnceTheLimitIsUsedUp() async throws {
+        let geocoder = RequestLimitedGeocoder(geocoder: StubGeocoder(.coordinate(1)), maxRequests: 2, store: InMemoryRequestCountStore())
+        #expect(await !geocoder.isAtRequestLimit)
+        _ = try await geocoder.coordinate(for: address)
+        #expect(await !geocoder.isAtRequestLimit)
+        _ = try await geocoder.coordinate(for: address)
+        #expect(await geocoder.isAtRequestLimit)
+        _ = await geocoder.setMaxRequests(3)
+        #expect(await !geocoder.isAtRequestLimit)
+    }
+
+    @Test func noLimitIsNeverAtLimit() async throws {
+        let geocoder = RequestLimitedGeocoder(geocoder: StubGeocoder(.coordinate(1)), maxRequests: nil, store: InMemoryRequestCountStore())
+        _ = try await geocoder.coordinate(for: address)
+        #expect(await !geocoder.isAtRequestLimit)
+    }
+
     @Test func noLimitMeansNoRefusals() async throws {
         let geocoder = RequestLimitedGeocoder(geocoder: StubGeocoder(.coordinate(1)), maxRequests: nil, store: InMemoryRequestCountStore())
         for _ in 0..<50 { _ = try await geocoder.coordinate(for: address) }

@@ -185,7 +185,47 @@ private struct CancelledSecondProviderGeocoder: Geocoder {
     }
 }
 
+/// Waits inside `coordinate(for:)` until the test lets it answer, so a test can act mid-lookup.
+private final class GatedGeocoder: Geocoder {
+    private let startedStream = AsyncStream<Void>.makeStream()
+    private let gateStream = AsyncStream<Void>.makeStream()
+    private let outcome: GeocodingError?
+
+    init(failingWith outcome: GeocodingError? = nil) { self.outcome = outcome }
+
+    func waitUntilStarted() async { for await _ in startedStream.stream { return } }
+    func release() { gateStream.continuation.yield() }
+
+    func coordinate(for postalAddress: CNPostalAddress) async throws(GeocodingError) -> CLLocationCoordinate2D? {
+        startedStream.continuation.yield()
+        for await _ in gateStream.stream { break }
+        if let outcome { throw outcome }
+        return CLLocationCoordinate2D(latitude: 1, longitude: 1)
+    }
+}
+
 @Suite struct RequestLimitedGeocoderTests {
+    private func countAfterResetDuringALookup(failingWith error: GeocodingError?) async -> Int {
+        let store = InMemoryRequestCountStore()
+        let gated = GatedGeocoder(failingWith: error)
+        let geocoder = RequestLimitedGeocoder(geocoder: gated, maxRequests: nil, store: store)
+
+        let lookup = Task { try? await geocoder.coordinate(for: CNPostalAddress()) }
+        await gated.waitUntilStarted()
+        await geocoder.resetCount()
+        gated.release()
+        _ = await lookup.value
+        return await store.load().count
+    }
+
+    @Test func aLookupThatSucceedsAfterAResetIsCounted() async {
+        #expect(await countAfterResetDuringALookup(failingWith: nil) == 1)
+    }
+
+    @Test func aLookupThatFailsAfterAResetLeavesTheCountAlone() async {
+        #expect(await countAfterResetDuringALookup(failingWith: .unavailable) == 0)
+    }
+
     @Test func refusesOnceTheLimitIsReached() async throws {
         let base = StubGeocoder(.coordinate(1))
         let geocoder = RequestLimitedGeocoder(geocoder: base, maxRequests: 2, store: InMemoryRequestCountStore())

@@ -15,6 +15,8 @@ actor RequestLimitedGeocoder: Geocoder {
     private var maxRequests: Int?
     private var state = RequestCount()
     private var isLoaded = false
+    /// Changes with every `resetCount()`, so a lookup can tell whether a reset happened while it waited.
+    private var generation = 0
 
     init(geocoder: any Geocoder, maxRequests: Int?, store: any RequestCountStore = CoreDataRequestCountStore()) {
         self.geocoder = geocoder
@@ -41,12 +43,21 @@ actor RequestLimitedGeocoder: Geocoder {
         // Reserve before awaiting so overlapping requests can't overshoot the limit.
         state.count += 1
         store.save(state)
+        let reservedIn = generation
         do throws(GeocodingError) {
-            return try await geocoder.coordinate(for: postalAddress)
+            let coordinate = try await geocoder.coordinate(for: postalAddress)
+            if generation != reservedIn {
+                // A reset wiped the reservation while this was in flight, but the request was made.
+                state.count += 1
+                store.save(state)
+            }
+            return coordinate
         } catch {
-            // A request that failed to get an answer doesn't count. `resetCount()` may have run meanwhile.
-            state.count = max(state.count - 1, 0)
-            store.save(state)
+            // A request that failed to get an answer doesn't count. After a reset the reservation is already gone.
+            if generation == reservedIn {
+                state.count -= 1
+                store.save(state)
+            }
             throw error
         }
     }
@@ -62,6 +73,7 @@ actor RequestLimitedGeocoder: Geocoder {
 
     /// Starts counting from zero again.
     func resetCount() {
+        generation += 1
         state = RequestCount()
         isLoaded = true
         store.save(state)
